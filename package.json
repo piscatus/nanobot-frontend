@@ -1,0 +1,33 @@
+{
+  "name": "nanobot",
+  "version": "1.0.0",
+  "description": "Feeless Custodial Discord Bot",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/piscatus/nanobot-frontend"
+  },
+  "main": "index.js",
+  "scripts": {
+    "test": "jest",
+    "start": "node index.js"
+  },
+  "author": "Hermes",
+  "license": "UNLICENSED",
+  "private": true,
+  "devDependencies": {
+    "jest": "^29.7.0"
+  },
+  "dependencies": {
+    "@discordjs/builders": "^1.7.0",
+    "@discordjs/rest": "^2.0.0",
+    "@discordjs/ws": "^1.0.0",
+    "axios": "^1.6.7",
+    "bignumber.js": "^9.1.2",
+    "discord-api-types": "^0.37.70",
+    "discord.js": "^14.12.1",
+    "nanocurrency": "^2.5.0",
+    "undici": "^5.28.4",
+    "uuid": "^9.0.1",
+    "xhr2": "^0.2.1"
+  }
+}

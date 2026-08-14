@@ -1,0 +1,5 @@
+.env
+.env.DEV
+.env.PRD
+node_modules
+cute

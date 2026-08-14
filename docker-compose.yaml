@@ -1,0 +1,25 @@
+services:
+  nanobot-frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ${CONTAINER_NAME}
+    cpus: "1.0"
+    env_file:
+      - .env
+    image: ${CONTAINER_NAME}
+    mem_limit: 4g
+    networks:
+      - backend-net
+    pids_limit: 500
+    ports:
+      - "${CONTAINER_PORT}:${CONTAINER_PORT}"
+    pull_policy: never
+    restart: always
+    volumes:
+      - ./cute:/app/cute
+
+networks:
+  backend-net:
+    external: true
+    name: ${CONTAINER_NETWORK}
