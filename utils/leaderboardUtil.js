@@ -1,8 +1,192 @@
-const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
+const {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  StringSelectMenuBuilder,
+} = require("discord.js");
 const { v4: uuidv4 } = require("uuid");
 const { getCommandIds } = require("./commandUtil.js");
-const { COMMAND_KEYS, EMOJIS } = require("./constants.js");
+const {
+  BROWSE_WINDOW_MILLISECONDS,
+  COMMAND_KEYS,
+  EMOJIS,
+  FILTER_ALL,
+  MAXIMUM_SELECT_OPTIONS,
+} = require("./constants.js");
 const { buildEmbed } = require("./embedUtil.js");
+const { safeDeferUpdate } = require("./interactionUtil.js");
+
+/**
+ * Discord wants a structured emoji on a select option, and custom emoji reach
+ * us as "<:name:id>" text. Anything that will not parse is dropped instead of
+ * being passed through, because one bad emoji is rejected for the whole payload
+ * and would take the entire menu down with it.
+ */
+function toSelectEmoji(raw) {
+  if (typeof raw !== "string" || raw.length === 0) {
+    return undefined;
+  }
+  const custom = raw.match(/^<(a)?:(\w+):(\d+)>$/);
+  if (custom) {
+    return { animated: Boolean(custom[1]), name: custom[2], id: custom[3] };
+  }
+  return raw.includes("<") ? undefined : raw;
+}
+
+/** Creature categories inside one currency, keeping the map's ordering. */
+function getScopedCategories(leaderboardData, ticker) {
+  const keys = Object.keys(leaderboardData ?? {});
+  if (!ticker || ticker === FILTER_ALL) {
+    return keys;
+  }
+  return keys.filter((key) => leaderboardData[key]?.ticker === ticker);
+}
+
+/**
+ * Currency choices for the scope menu.
+ *
+ * <p>A menu holds 25 options, so "All Currencies" is only offered while every
+ * creature still fits in the creature menu beneath it. Once the roster outgrows
+ * that, a currency has to be picked first. Scoping this way is what keeps every
+ * creature reachable: four currencies of eight is 32 creatures, which no single
+ * flat menu could ever list.
+ */
+function buildLeaderboardCurrencyOptions(leaderboardData, currencies) {
+  const keys = Object.keys(leaderboardData ?? {});
+
+  const byTicker = new Map(
+    (currencies ?? [])
+      .filter((currency) => currency?.ticker)
+      .map((currency) => [currency.ticker.toUpperCase(), currency]),
+  );
+
+  const tickers = [
+    ...new Set(
+      keys.map((key) => leaderboardData[key]?.ticker).filter(Boolean),
+    ),
+  ].sort();
+
+  const options = tickers.map((ticker) => {
+    const currency = byTicker.get(ticker);
+    const count = getScopedCategories(leaderboardData, ticker).length;
+    return {
+      value: ticker,
+      label: currency?.name ? `${currency.name} [${ticker}]` : ticker,
+      description: `${count} creature${count === 1 ? "" : "s"}`,
+      emoji: toSelectEmoji(currency?.emoji),
+    };
+  });
+
+  // With a single currency, "all" and that currency are the same board, so the
+  // choice would be noise.
+  if (tickers.length > 1 && keys.length <= MAXIMUM_SELECT_OPTIONS) {
+    options.unshift({
+      value: FILTER_ALL,
+      label: "All Currencies",
+      description: `${keys.length} creature${keys.length === 1 ? "" : "s"}`,
+      emoji: EMOJIS.CURRENCY_COIN,
+    });
+  }
+
+  return options.slice(0, MAXIMUM_SELECT_OPTIONS);
+}
+
+/** Creature choices in the current scope, each showing how many anglers rank. */
+function buildLeaderboardCreatureOptions(leaderboardData, ticker) {
+  return getScopedCategories(leaderboardData, ticker)
+    .slice(0, MAXIMUM_SELECT_OPTIONS)
+    .map((key) => {
+      const category = leaderboardData[key];
+      const anglers = category?.users?.length ?? 0;
+      return {
+        value: key,
+        label: category?.name ?? key,
+        description: `${anglers} angler${anglers === 1 ? "" : "s"}`,
+        emoji: toSelectEmoji(category?.emoji),
+      };
+    });
+}
+
+/**
+ * Where to open. An explicitly requested currency wins, then a requested
+ * creature, then everything if it fits, and finally the first creature's
+ * currency. A request that matches nothing falls back rather than opening on an
+ * empty board.
+ */
+function resolveInitialState(
+  leaderboardData,
+  requestedTicker,
+  requestedCreature,
+) {
+  const keys = Object.keys(leaderboardData ?? {});
+  const allFits = keys.length <= MAXIMUM_SELECT_OPTIONS;
+  const defaultTicker = allFits
+    ? FILTER_ALL
+    : leaderboardData[keys[0]]?.ticker ?? FILTER_ALL;
+
+  const creature =
+    requestedCreature && keys.includes(requestedCreature.toUpperCase())
+      ? requestedCreature.toUpperCase()
+      : null;
+
+  let ticker = requestedTicker ? requestedTicker.toUpperCase() : null;
+
+  if (!ticker && creature) {
+    ticker = allFits ? FILTER_ALL : leaderboardData[creature].ticker;
+  }
+
+  if (!ticker || getScopedCategories(leaderboardData, ticker).length === 0) {
+    ticker = defaultTicker;
+  }
+
+  const scoped = getScopedCategories(leaderboardData, ticker);
+
+  return {
+    ticker,
+    category: creature && scoped.includes(creature) ? creature : scoped[0],
+    currentPage: 0,
+  };
+}
+
+/** Choices for the creature autocomplete, narrowed by what has been typed. */
+function buildCreatureAutocompleteChoices(creatures, query, ticker) {
+  const search = String(query ?? "")
+    .trim()
+    .toLowerCase();
+
+  return (creatures ?? [])
+    .filter((creature) => creature?.name)
+    .filter(
+      (creature) =>
+        !ticker ||
+        creature.ticker?.toUpperCase() === String(ticker).toUpperCase(),
+    )
+    .filter((creature) => creature.name.toLowerCase().includes(search))
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .slice(0, MAXIMUM_SELECT_OPTIONS)
+    .map((creature) => ({
+      name: creature.ticker
+        ? `${creature.name} [${creature.ticker}]`
+        : creature.name,
+      value: creature.name.toUpperCase(),
+    }));
+}
+
+/** Drops keys Discord rejects when absent rather than sending them undefined. */
+function toSelectOption(option, selectedValue) {
+  const built = {
+    label: option.label,
+    value: option.value,
+    default: option.value === selectedValue,
+  };
+  if (option.description) {
+    built.description = option.description;
+  }
+  if (option.emoji) {
+    built.emoji = option.emoji;
+  }
+  return built;
+}
 
 function buildLeaderboardData(responseData) {
   const { currencies, creatures, leaderboards } = responseData;
@@ -90,6 +274,7 @@ function buildLeaderboardData(responseData) {
       emoji: creature?.emoji,
       name: creature?.name,
       pluralization: creature?.pluralization,
+      ticker,
       users,
     };
   });
@@ -105,10 +290,9 @@ async function leaderboardCollectorCreator(
   title,
   leaderboardData,
   commands,
-  categories,
   state,
   pageSize,
-  buildRow,
+  buildComponents,
   userId,
 ) {
   const filter = (i) =>
@@ -117,7 +301,7 @@ async function leaderboardCollectorCreator(
 
   const collector = interactionReply.createMessageComponentCollector({
     filter,
-    time: 60000,
+    time: BROWSE_WINDOW_MILLISECONDS,
   });
 
   collector.on("collect", async (i) => {
@@ -128,32 +312,40 @@ async function leaderboardCollectorCreator(
 
     client.buttonCooldowns.set(uid, Date.now() + 1000);
 
-    await i.deferUpdate();
+    if (!(await safeDeferUpdate(i))) return;
 
-    const maxPage = Math.floor(
-      (leaderboardData[categories[state.currentCategoryIndex]].users.length -
-        1) /
-        pageSize,
-    );
+    // Wrapping stays inside the chosen currency, so it can never carry the
+    // board somewhere the menus above it say you are not.
+    const scoped = getScopedCategories(leaderboardData, state.ticker);
+    const position = Math.max(scoped.indexOf(state.category), 0);
+    const users = leaderboardData[state.category]?.users ?? [];
+    const maxPage = Math.max(Math.ceil(users.length / pageSize) - 1, 0);
 
     switch (i.customId) {
+      case ids.currency: {
+        state.ticker = i.values?.[0] ?? FILTER_ALL;
+        state.category = getScopedCategories(leaderboardData, state.ticker)[0];
+        state.currentPage = 0;
+        break;
+      }
+
+      case ids.creature:
+        state.category = i.values?.[0] ?? state.category;
+        state.currentPage = 0;
+        break;
+
       case ids.wrapLeft:
-        state.currentCategoryIndex =
-          (state.currentCategoryIndex - 1 + categories.length) %
-          categories.length;
+        state.category =
+          scoped[(position - 1 + scoped.length) % scoped.length];
         state.currentPage = 0;
         break;
 
       case ids.wrapRight:
-        state.currentCategoryIndex =
-          (state.currentCategoryIndex + 1) % categories.length;
+        state.category = scoped[(position + 1) % scoped.length];
         state.currentPage = 0;
         break;
 
       case ids.userRank: {
-        const users =
-          leaderboardData[categories[state.currentCategoryIndex]].users;
-
         const userIndex = users.findIndex((u) => u.userId === uid);
 
         if (userIndex !== -1) {
@@ -181,7 +373,7 @@ async function leaderboardCollectorCreator(
 
     await interaction.editReply({
       embeds: [newEmbed],
-      components: [buildRow()],
+      components: buildComponents(),
     });
   });
 
@@ -196,8 +388,7 @@ async function leaderboardCollectorCreator(
 
 function getLeaderboardEmbed(title, data, commands, state, userId) {
   const pageSize = 10;
-  const categories = Object.keys(data);
-  const categoryData = data[categories[state.currentCategoryIndex]];
+  const categoryData = data?.[state.category];
   const leaderboard = categoryData?.users;
   const commandMap = getCommandIds(commands);
   let myQuantity = null;
@@ -266,6 +457,11 @@ function getLeaderboardEmbed(title, data, commands, state, userId) {
 }
 
 exports.buildLeaderboardData = buildLeaderboardData;
+exports.buildCreatureAutocompleteChoices = buildCreatureAutocompleteChoices;
+exports.buildLeaderboardCreatureOptions = buildLeaderboardCreatureOptions;
+exports.buildLeaderboardCurrencyOptions = buildLeaderboardCurrencyOptions;
+exports.getScopedCategories = getScopedCategories;
+exports.resolveInitialState = resolveInitialState;
 
 exports.paginateLeaderboard = async function (
   interaction,
@@ -274,16 +470,26 @@ exports.paginateLeaderboard = async function (
   leaderboardData,
   commands,
   userId,
+  currencies,
+  requestedTicker = null,
+  requestedCreature = null,
 ) {
-  const categories = Object.keys(leaderboardData);
   const pageSize = 10;
 
-  const state = {
-    currentCategoryIndex: 0,
-    currentPage: 0,
-  };
+  const state = resolveInitialState(
+    leaderboardData,
+    requestedTicker,
+    requestedCreature,
+  );
+
+  const currencyOptions = buildLeaderboardCurrencyOptions(
+    leaderboardData,
+    currencies,
+  );
 
   const ids = {
+    currency: uuidv4(),
+    creature: uuidv4(),
     wrapLeft: uuidv4(),
     left: uuidv4(),
     userRank: uuidv4(),
@@ -291,29 +497,82 @@ exports.paginateLeaderboard = async function (
     wrapRight: uuidv4(),
   };
 
-  const buildRow = () => {
-    return new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId(ids.wrapLeft)
-        .setLabel(EMOJIS.REWIND_ARROW)
-        .setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder()
-        .setCustomId(ids.left)
-        .setLabel(EMOJIS.BACK_ARROW)
-        .setStyle(ButtonStyle.Primary),
-      new ButtonBuilder()
-        .setCustomId(ids.userRank)
-        .setLabel(EMOJIS.RECEIVER_BULLSEYE)
-        .setStyle(ButtonStyle.Success),
-      new ButtonBuilder()
-        .setCustomId(ids.right)
-        .setLabel(EMOJIS.FORWARD_ARROW)
-        .setStyle(ButtonStyle.Primary),
-      new ButtonBuilder()
-        .setCustomId(ids.wrapRight)
-        .setLabel(EMOJIS.FASTFORWARD_ARROW)
-        .setStyle(ButtonStyle.Secondary),
+  const buildComponents = () => {
+    const rows = [];
+
+    // One currency is not a choice, so the menu only earns its row once there
+    // is somewhere else to go.
+    if (currencyOptions.length > 1) {
+      rows.push(
+        new ActionRowBuilder().addComponents(
+          new StringSelectMenuBuilder()
+            .setCustomId(ids.currency)
+            .setPlaceholder("Filter by currency")
+            .addOptions(
+              currencyOptions.map((option) =>
+                toSelectOption(option, state.ticker),
+              ),
+            ),
+        ),
+      );
+    }
+
+    const creatureOptions = buildLeaderboardCreatureOptions(
+      leaderboardData,
+      state.ticker,
     );
+
+    if (creatureOptions.length > 1) {
+      rows.push(
+        new ActionRowBuilder().addComponents(
+          new StringSelectMenuBuilder()
+            .setCustomId(ids.creature)
+            .setPlaceholder("Jump to a creature")
+            .addOptions(
+              creatureOptions.map((option) =>
+                toSelectOption(option, state.category),
+              ),
+            ),
+        ),
+      );
+    }
+
+    const users = leaderboardData?.[state.category]?.users ?? [];
+    const totalPages = Math.max(Math.ceil(users.length / pageSize), 1);
+    const atFirst = state.currentPage <= 0;
+    const atLast = state.currentPage >= totalPages - 1;
+    const singleCreature = creatureOptions.length < 2;
+
+    rows.push(
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(ids.wrapLeft)
+          .setLabel(EMOJIS.REWIND_ARROW)
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(singleCreature),
+        new ButtonBuilder()
+          .setCustomId(ids.left)
+          .setLabel(EMOJIS.BACK_ARROW)
+          .setStyle(ButtonStyle.Primary)
+          .setDisabled(atFirst),
+        new ButtonBuilder()
+          .setCustomId(ids.userRank)
+          .setLabel(EMOJIS.RECEIVER_BULLSEYE)
+          .setStyle(ButtonStyle.Success),
+        new ButtonBuilder()
+          .setCustomId(ids.right)
+          .setLabel(EMOJIS.FORWARD_ARROW)
+          .setStyle(ButtonStyle.Primary)
+          .setDisabled(atLast),
+        new ButtonBuilder()
+          .setCustomId(ids.wrapRight)
+          .setLabel(EMOJIS.FASTFORWARD_ARROW)
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(singleCreature),
+      ),
+    );
+
+    return rows;
   };
 
   const embed = getLeaderboardEmbed(
@@ -326,7 +585,7 @@ exports.paginateLeaderboard = async function (
 
   const replyEmbed = await interaction.editReply({
     embeds: [embed],
-    components: [buildRow()],
+    components: buildComponents(),
     fetchReply: true,
   });
 
@@ -338,10 +597,9 @@ exports.paginateLeaderboard = async function (
     title,
     leaderboardData,
     commands,
-    categories,
     state,
     pageSize,
-    buildRow,
+    buildComponents,
     userId,
   );
 };

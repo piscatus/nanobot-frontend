@@ -1,4 +1,5 @@
 const { PermissionsBitField } = require("discord.js");
+const { carousel } = require("./buttonUtil.js");
 const { sendEmbed } = require("./channelUtil.js");
 const { buildEmbed } = require("./embedUtil.js");
 const { COMMAND_OPTION_KEYS, STATUS_CODES } = require("./constants.js");
@@ -108,6 +109,7 @@ async function executeReadOnlyEmbedCommand(interaction, client, options) {
     commandKey,
     apiCall,
     buildEmbed: buildEmbedFn,
+    buildPanels: buildPanelsFn,
     isMessage,
     isPrivileged,
     formatPermissionMessage,
@@ -133,6 +135,16 @@ async function executeReadOnlyEmbedCommand(interaction, client, options) {
       ))
     )
       return;
+
+    // Filter buttons are for the requesting user's own reply. A public post is
+    // a static snapshot, since its collector would expire and its buttons would
+    // do nothing for everyone except whoever ran the command.
+    if (buildPanelsFn && !isMessage) {
+      const panels = buildPanelsFn(response.data);
+      if (panels?.length > 0) {
+        return await carousel(interaction, client, panels);
+      }
+    }
 
     const embed = buildEmbedFn(response.data);
 

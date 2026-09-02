@@ -19,8 +19,22 @@ describe("requests/fish", () => {
       guildId: "231",
       userId: "213",
       userRoles: ["123", "321", "231"],
+      ticker: null,
     });
     expect(result).toEqual(mockResponse);
     expect(result.status).toBe(200);
+  });
+
+  it("passes the currency ticker through when one is chosen", async () => {
+    apiRequest.mockResolvedValue({ data: {}, status: 200 });
+
+    await fish.execute("231", "213", ["123"], "BAN");
+
+    expect(apiRequest).toHaveBeenCalledWith("put", "/requests/fish", {
+      guildId: "231",
+      userId: "213",
+      userRoles: ["123"],
+      ticker: "BAN",
+    });
   });
 });

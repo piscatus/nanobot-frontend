@@ -1,5 +1,10 @@
 const { getCommandIds } = require("./commandUtil.js");
 const { COLORS, COMMAND_KEYS, EMOJIS } = require("./constants.js");
+const {
+  formatConfirmationRequirement,
+  getExplorerAccountUrl,
+  getSortedEnabledCurrencies,
+} = require("./currencyUtil.js");
 
 function findAddressByTicker(addresses, ticker) {
   return addresses.find(
@@ -26,80 +31,69 @@ function getDepositAddressDesc(messageAuthor, currency, commands, address) {
   );
 }
 
-function buildReceiveSwapParams(data, userId) {
-  const { addresses, currencies, commands } = data;
-
-  const nanocurrency = currencies.find(
-    (c) => c.name.toLowerCase() === "nano",
-  );
-  const bananocurrency = currencies.find(
-    (c) => c.name.toLowerCase() === "banano",
-  );
-
-  const nanoDisabled =
-    !nanocurrency.enabled || !nanocurrency.processDeposits;
-  const bananoDisabled =
-    !bananocurrency.enabled || !bananocurrency.processDeposits;
-
-  const xnoAddress = findAddressByTicker(addresses, nanocurrency.ticker);
-  const banAddress = findAddressByTicker(addresses, bananocurrency.ticker);
-
-  const nanoDepositInfo = getDepositAddressDesc(
-    userId,
-    nanocurrency.name,
-    commands,
-    xnoAddress,
-  );
-  const bananoDepositInfo = getDepositAddressDesc(
-    userId,
-    bananocurrency.name,
-    commands,
-    banAddress,
-  );
-
-  const supportMessage =
-    "Users can join our Discord server for inquiries and support help:";
-
-  const nanoList = {
-    name: `Deposit **only** XNO ${nanocurrency.emoji} to this address, any other sent funds will be lost!`,
-    value: `https://nanexplorer.com/nano/account/${findAddressByTicker(
-      addresses,
-      "xno",
-    )}`,
-  };
-
-  const bananoList = {
-    name: `Deposit **only** BAN ${bananocurrency.emoji} to this address, any other sent funds will be lost!`,
-    value: `https://nanexplorer.com/banano/account/${findAddressByTicker(
-      addresses,
-      "ban",
-    )}`,
-  };
-
+function getSupportField() {
   return {
-    color1: nanoDisabled ? COLORS.ERROR_RED : nanocurrency.color,
-    color2: bananoDisabled ? COLORS.ERROR_RED : bananocurrency.color,
-    title1: `${EMOJIS.DEPOSIT_INBOX} Nano Deposit Address`,
-    content1: nanoDisabled
-      ? getDepositsDisabledDesc(userId, nanocurrency.name)
-      : nanoDepositInfo,
-    address1: nanoDisabled ? null : xnoAddress,
-    field1: nanoDisabled
-      ? { name: supportMessage, value: process.env.HOME_SERVER_INVITE_URL }
-      : nanoList,
-    title2: `${EMOJIS.DEPOSIT_INBOX} Banano Deposit Address`,
-    content2: bananoDisabled
-      ? getDepositsDisabledDesc(userId, bananocurrency.name)
-      : bananoDepositInfo,
-    address2: bananoDisabled ? null : banAddress,
-    field2: bananoDisabled
-      ? { name: supportMessage, value: process.env.HOME_SERVER_INVITE_URL }
-      : bananoList,
+    name: "Users can join our Discord server for inquiries and support help:",
+    value: process.env.HOME_SERVER_INVITE_URL,
   };
 }
 
+/**
+ * Deposit warning field. Explorer links belong on the embed title (the same
+ * pattern as /send and /update), so this field is free for settlement copy on
+ * every currency - including Nano and Banano, which used to hide it behind the
+ * account URL.
+ */
+function getDepositField(currency) {
+  const warning = `Deposit **only** ${currency.ticker.toUpperCase()} ${
+    currency.emoji
+  } to this address, any other sent funds will be lost!`;
+
+  const confirmations = formatConfirmationRequirement(currency);
+  return {
+    name: warning,
+    value: confirmations
+      ? `Deposits are credited after ${confirmations}.`
+      : "Deposits are credited once confirmed on the network.",
+  };
+}
+
+/**
+ * One panel per enabled currency, ordered by ticker so the carousel buttons
+ * read alphabetically. Sorting here rather than relying on the API's order
+ * means adding a currency cannot quietly reshuffle the buttons, which matters
+ * when the position of a deposit address is muscle memory.
+ */
+function buildReceivePanels(data, userId) {
+  const { addresses, currencies, commands } = data;
+
+  return getSortedEnabledCurrencies(currencies).map((currency) => {
+    const address = findAddressByTicker(addresses ?? [], currency.ticker);
+
+    // No address means the backend could not allocate one, for example a
+    // wallet being unreachable. Treat it like disabled rather than rendering
+    // an address that cannot receive funds.
+    const unavailable = !currency.processDeposits || !address;
+
+    return {
+      label: currency.ticker.toUpperCase(),
+      title: `${EMOJIS.DEPOSIT_INBOX} ${currency.name} Deposit Address`,
+      // Clickable title, matching /send and /update. Null for Monero: addresses
+      // never appear on chain, so there is nothing to link.
+      url: unavailable ? null : getExplorerAccountUrl(currency, address),
+      color: unavailable ? COLORS.ERROR_RED : currency.color,
+      content: unavailable
+        ? getDepositsDisabledDesc(userId, currency.name)
+        : getDepositAddressDesc(userId, currency.name, commands, address),
+      textContent: unavailable ? null : address,
+      list: unavailable ? getSupportField() : getDepositField(currency),
+    };
+  });
+}
+
 module.exports = {
-  buildReceiveSwapParams,
+  buildReceivePanels,
   getDepositsDisabledDesc,
   getDepositAddressDesc,
+  getDepositField,
 };

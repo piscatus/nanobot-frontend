@@ -1,5 +1,10 @@
 const { getCommandIds } = require("./commandUtil.js");
-const { COMMAND_KEYS } = require("./constants.js");
+const {
+  COLORS,
+  COMMAND_DESCRIPTIONS,
+  COMMAND_KEYS,
+  EMOJIS,
+} = require("./constants.js");
 const {
   getCurrencyDecimalValue,
   getCurrencyDollarValue,
@@ -123,6 +128,61 @@ function formatCreatures(creaturesDB, currenciesDB) {
     });
 }
 
+/**
+ * Panels for the /creatures filter buttons: an overview followed by one panel
+ * per currency that actually has creatures. Tickers come from the creature list
+ * rather than a fixed set, so a new currency appears automatically.
+ */
+function buildCreaturePanels(creatures, currencies, commands) {
+  const description = formatCreatureCommands(commands);
+
+  const allPanel = {
+    label: "ALL",
+    title: `${EMOJIS.CREATURES_FISH} ${COMMAND_DESCRIPTIONS.CREATURES}`,
+    color: COLORS.NANOBOT_BLUE,
+    content: description,
+    list: formatCreatures(creatures, currencies),
+  };
+
+  if (!Array.isArray(creatures) || !Array.isArray(currencies)) {
+    return [allPanel];
+  }
+
+  const enabledByTicker = new Map(
+    currencies.filter((c) => c.enabled).map((c) => [c.ticker, c]),
+  );
+
+  const tickers = [
+    ...new Set(
+      creatures
+        .map((creature) => creature.ticker)
+        .filter((ticker) => enabledByTicker.has(ticker)),
+    ),
+  ].sort();
+
+  // A single currency makes the filters redundant with the overview.
+  if (tickers.length < 2) {
+    return [allPanel];
+  }
+
+  return [
+    allPanel,
+    ...tickers.map((ticker) => {
+      const currency = enabledByTicker.get(ticker);
+      return {
+        label: ticker.toUpperCase(),
+        title: `${currency.emoji} ${currency.name} ${COMMAND_DESCRIPTIONS.CREATURES}`,
+        color: currency.color,
+        content: description,
+        list: formatCreatures(
+          creatures.filter((creature) => creature.ticker === ticker),
+          currencies,
+        ),
+      };
+    }),
+  ];
+}
+
 function formatCreatureMessage(commands) {
   const commandMap = getCommandIds(commands);
   return `-# Use </${COMMAND_KEYS.CREATURES}:${
@@ -171,6 +231,7 @@ function formatCreatureBonusMessage(commands) {
 }
 
 module.exports = {
+  buildCreaturePanels,
   getBonusMultiplier,
   getDecimalCreatureValue,
   formatCreatureCommands,

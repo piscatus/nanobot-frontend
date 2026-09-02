@@ -11,7 +11,11 @@
 
 ## Logic Flow
 
-1. `executeReadOnlyEmbedCommand`: API call `currenciesAPI(guildId, userId)` → status check → build embed via `formatCurrencies` → `respondWithEmbed` with `getAdminMessageOptions`
+1. `executeReadOnlyEmbedCommand`: API call `currenciesAPI(guildId, userId)` → status check → `buildCurrencyPanels` → `carousel` with an `ALL` page plus one page per enabled currency
+
+When the admin `message` option is used the reply is posted publicly as a single
+static embed built by `formatCurrencies`, since a component collector is scoped
+to the requesting user and would do nothing for other readers.
 
 ## Options
 

@@ -7,14 +7,20 @@
 ## Interaction Types
 
 - Read-only
-- Swappable (swap button to toggle user vs subordinate view)
+- Paged (currency filter buttons, plus `SUB` prefixed pages when a subordinate
+  account is linked)
 
 ## Logic Flow
 
 1. API call: `inventoryAPI(guildId, userId)`
 2. Status check via `executeWithStatusCheck`
-3. If subordinate exists: `swap` with user and subordinate inventory panels
-4. Else: reply with `buildInventoryEmbed`
+3. `buildInventoryPanels` builds an `ALL` page plus one page per currency present
+4. `carousel` renders the pages with a button per filter
+
+Filter buttons are omitted when the inventory spans fewer than two currencies,
+since they would duplicate the `ALL` page. A linked subordinate's pages are
+appended rather than merged into the same embed, because one field per creature
+type means a merged unfiltered view could exceed Discord's 25 field limit.
 
 ## Options
 

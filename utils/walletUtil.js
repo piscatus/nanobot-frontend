@@ -44,7 +44,23 @@ function getCurrencyInfo(wallet, currencies) {
   };
 }
 
-function formatWallet(walletArray) {
+const CONCEALED_PLACEHOLDER = "?????";
+
+/**
+ * @param {Array} walletArray - output of getSortedWallet
+ * @param {boolean} [includeZeroBalances] - keep entries worth zero. Off for user
+ *   facing balances, where empty currencies are noise, but on for the audit hot
+ *   wallet view, where "we hold none of this" is the point.
+ * @param {Set<string>} [concealedTickers] - tickers whose amounts are replaced
+ *   with a placeholder. Concealed entries are also left out of the USD total,
+ *   because a total that included them could be differenced against the visible
+ *   rows to recover the hidden amount.
+ */
+function formatWallet(
+  walletArray,
+  includeZeroBalances = false,
+  concealedTickers = null,
+) {
   const noCurrencies = {
     name: "No Currencies",
     value: "\u200b",
@@ -54,8 +70,18 @@ function formatWallet(walletArray) {
     return noCurrencies;
   }
 
+  const isConcealed = (ticker) =>
+    Boolean(concealedTickers && concealedTickers.has(ticker));
+
   const filteredCurrencies = walletArray.filter(
-    (currency) => currency && currency.enabled && currency.value !== "0",
+    (currency) =>
+      currency &&
+      currency.enabled &&
+      // A concealed currency is always listed. Hiding the row entirely when the
+      // balance happens to be zero would itself disclose the balance.
+      (includeZeroBalances ||
+        currency.value !== "0" ||
+        isConcealed(currency.ticker)),
   );
 
   if (filteredCurrencies.length === 0) {
@@ -64,16 +90,26 @@ function formatWallet(walletArray) {
 
   const details = filteredCurrencies.map((walletInfo) => ({
     name: `${walletInfo.emoji} ${walletInfo.name ?? walletInfo.ticker}`,
-    value: `> **${walletInfo.value} ${walletInfo.ticker}** ≈ $${
-      walletInfo.dollarValue ?? "0"
-    }`,
+    value: isConcealed(walletInfo.ticker)
+      ? `> **${CONCEALED_PLACEHOLDER} ${walletInfo.ticker}** ≈ $${CONCEALED_PLACEHOLDER}`
+      : `> **${walletInfo.value} ${walletInfo.ticker}** ≈ $${
+          walletInfo.dollarValue ?? "0"
+        }`,
     inline: true,
   }));
 
   if (walletArray.length > 1) {
+    const disclosed = walletArray.filter(
+      (walletInfo) => !isConcealed(walletInfo.ticker),
+    );
+    const hasConcealed = disclosed.length !== walletArray.length;
     details.push({
-      name: EMOJIS.CURRENCY_COIN + " __**Estimated Currency Total (USD)**__",
-      value: `> **$${getDollarsTotal(null, walletArray)}**`,
+      name:
+        EMOJIS.CURRENCY_COIN +
+        (hasConcealed
+          ? " __**Estimated Currency Total (USD, public currencies only)**__"
+          : " __**Estimated Currency Total (USD)**__"),
+      value: `> **$${getDollarsTotal(null, disclosed)}**`,
       inline: false,
     });
   }

@@ -1,5 +1,5 @@
-const { buildCriteriaList } = require("./transferUtil.js");
-const { EMOJIS } = require("./constants.js");
+const { buildCriteriaList, getConfirmationInfo } = require("./transferUtil.js");
+const { COMMAND_KEYS, EMOJIS } = require("./constants.js");
 
 describe("transferUtil", () => {
   describe("buildCriteriaList", () => {
@@ -82,6 +82,82 @@ describe("transferUtil", () => {
         r.name?.includes("Random Winners")
       );
       expect(winnersField).toBeUndefined();
+    });
+  });
+
+  describe("getConfirmationInfo", () => {
+    const nano = {
+      ticker: "xno",
+      name: "Nano",
+      color: "#209ce9",
+      precision: 30,
+      value: "1",
+      confirmations: "1",
+    };
+
+    it("mentions a single confirmation on a representative update", () => {
+      const embed = getConfirmationInfo({
+        userId: "user1",
+        input: null,
+        command: COMMAND_KEYS.UPDATE,
+        address: "nano_abc",
+        isComplete: false,
+        optional: null,
+        items: [],
+        wallets: [{ ticker: "xno", raw: "0" }],
+        creatures: null,
+        commands: [],
+        bonuses: null,
+        currencies: [nano],
+        drop: null,
+        displayTimestamp: false,
+        title: "Update",
+        url: null,
+        includeNotes: false,
+        transactionId: null,
+      });
+      expect(embed.data.description).toContain(
+        "Settles after 1 network confirmation.",
+      );
+      expect(embed.data.description).not.toContain("Network Fee");
+      expect(embed.data.description).not.toContain("feeless");
+    });
+
+    it("mentions fee and confirmations on a withdrawal", () => {
+      const embed = getConfirmationInfo({
+        userId: "user1",
+        input: "1 xmr",
+        command: COMMAND_KEYS.SEND,
+        address: "4abc",
+        isComplete: false,
+        optional: null,
+        items: [],
+        wallets: [{ ticker: "xmr", raw: "100000000000" }],
+        creatures: null,
+        commands: [],
+        bonuses: null,
+        currencies: [
+          {
+            ticker: "xmr",
+            name: "Monero",
+            color: "#FF6600",
+            precision: 12,
+            value: "150",
+            feeEstimate: "60000000",
+            confirmations: "10",
+          },
+        ],
+        drop: null,
+        displayTimestamp: false,
+        title: "Send",
+        url: null,
+        includeNotes: false,
+        transactionId: null,
+      });
+      expect(embed.data.description).toContain("Network Fee");
+      expect(embed.data.description).toContain(
+        "Settles after 10 network confirmations.",
+      );
     });
   });
 });

@@ -20,12 +20,57 @@ const {
 const { sendVerificationCaptchaPuzzle } = require("./utils/buttonUtil.js");
 const { buildEmbed } = require("./utils/embedUtil.js");
 const { formatErrorTitle } = require("./utils/errorUtil.js");
+const { execute: getCreatures } = require("./jobs/getCreatures.js");
+const { execute: getCurrencies } = require("./jobs/getCurrencies.js");
 const { execute: setActivity } = require("./jobs/setActivity.js");
 const { execute: setCommands } = require("./jobs/setCommands.js");
 const { execute: joinDrop } = require("./requests/pickup.js");
 const verificationsApi = require("./requests/verifications.js");
 const { checkStatuses } = require("./utils/statusUtil.js");
-async function deployCommands() {
+const { safeDeferUpdate } = require("./utils/interactionUtil.js");
+
+// Backstop. Any unhandled rejection terminates Node, which takes the bot
+// offline for every guild until the container restarts. A single expired
+// interaction token is not worth an outage, so log and keep running.
+process.on("unhandledRejection", (reason) => {
+  console.error("UNHANDLED REJECTION (kept alive):", reason);
+});
+
+process.on("uncaughtException", (err) => {
+  console.error("UNCAUGHT EXCEPTION (kept alive):", err);
+});
+
+/**
+ * Live data some commands need to build their options. Discord fixes a
+ * command's choices at deploy time, so this is read once per boot. A command
+ * that cannot get its data simply deploys without the dependent option.
+ */
+async function loadCommandContext() {
+  const [currenciesResponse, creaturesResponse] = await Promise.all([
+    getCurrencies(),
+    getCreatures(),
+  ]);
+
+  const currencies = currenciesResponse?.data ?? null;
+  const creatures = creaturesResponse?.data ?? null;
+
+  if (!currencies?.length || !creatures?.length) {
+    console.warn(
+      "Could not load currencies and creatures; deploying commands without currency choices.",
+    );
+  }
+
+  return { currencies, creatures };
+}
+
+async function toCommandJson(command, context) {
+  const data = command.buildData
+    ? await command.buildData(context)
+    : command.data;
+  return data.toJSON();
+}
+
+async function deployCommands(commandContext) {
   const rest = new REST({ version: "9" }).setToken(process.env.BOT_USER_SECRET);
 
   const serverCommands = [];
@@ -35,7 +80,7 @@ async function deployCommands() {
 
   for (const file of serverCommandFiles) {
     const command = require("./commands/Server/" + file);
-    serverCommands.push(command.data.toJSON());
+    serverCommands.push(await toCommandJson(command, commandContext));
   }
 
   if (serverCommands.length > 0) {
@@ -79,7 +124,7 @@ async function deployCommands() {
       file.toLowerCase() !== "award.js"
     ) {
       const command = require("./commands/Global/" + file);
-      globalCommands.push(command.data.toJSON());
+      globalCommands.push(await toCommandJson(command, commandContext));
     }
   }
 
@@ -179,8 +224,12 @@ async function initialize() {
     client.commands.set(command.data.name, command);
   }
 
+  // Autocomplete has three seconds to answer, so the same startup data that
+  // builds the command options is kept for handlers to read from.
+  client.commandContext = await loadCommandContext();
+
   console.log("Telling Discord about the commands...");
-  await deployCommands();
+  await deployCommands(client.commandContext);
 
   console.log("Starting events handler...");
   ["events"].forEach((handler) => {
@@ -195,6 +244,20 @@ async function initialize() {
     try {
       const guild = interaction.guild;
       const userId = interaction.user.id;
+
+      // Suggestions must be answered directly and must not be deferred, so this
+      // runs ahead of the member fetch and every other branch.
+      if (interaction.isAutocomplete()) {
+        const command = client.commands.get(interaction.commandName);
+        if (command?.autocomplete) {
+          try {
+            await command.autocomplete(interaction, client);
+          } catch (error) {
+            console.error("autocomplete", interaction.commandName, error);
+          }
+        }
+        return;
+      }
 
       // Fetch members ONLY the first time this guild runs this command
       if (
@@ -269,7 +332,9 @@ async function initialize() {
                 commandKey: COMMAND_KEYS.PICKUP,
                 onCaptchaSuccess: async (i) => {
                   const captchaUserId = i.user.id;
-                  await i.deferUpdate();
+                  // A captcha can sit unanswered long enough for the token to
+                  // expire. Throwing here used to terminate the process.
+                  if (!(await safeDeferUpdate(i))) return;
                   await verificationsApi.completeAfterCaptcha(captchaUserId);
                   const captchaRoles =
                     i.member?.roles?.cache?.map((r) => r.id) ?? null;

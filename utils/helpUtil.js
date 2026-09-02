@@ -4,10 +4,16 @@ const {
   COMMAND_OPTION_KEYS,
   COMMAND_KEYS,
 } = require("./constants.js");
-const { getCurrencyDecimalValue } = require("./currencyUtil.js");
+const {
+  formatConfirmationRequirement,
+  formatNetworkNotice,
+  getCurrencyDecimalValue,
+  getDecimalPlaces,
+  getEffectiveMinimumWithdraw,
+} = require("./currencyUtil.js");
 
-function formatConfirmationMessage(type) {
-  return `-# Once the ${type} is confirmed and reflected on the network, users will receive a direct message with their block hash.\n`;
+function formatConfirmationMessage(type, dmContents = "their block hash") {
+  return `-# Once the ${type} is confirmed and reflected on the network, users will receive a direct message with ${dmContents}.\n`;
 }
 
 function formatSpamMessage(type) {
@@ -29,7 +35,7 @@ function formatCurrencyMinimums(currencies, commandMap, getMinimum, formatLine) 
     const minVal = getMinimum(c);
     if (!minVal) continue;
     const formatted = getCurrencyDecimalValue(minVal, c.precision);
-    const decimals = c.precision - minVal.length + 1;
+    const decimals = getDecimalPlaces(minVal, c.precision);
     details += formatLine(c, formatted, decimals);
   }
   return details;
@@ -83,6 +89,12 @@ function formatAwardsHelp(commands, currencies) {
   );
 }
 
+/** Confirmation requirement line, empty when the currency does not specify one. */
+function formatCurrencyConfirmations(currency) {
+  const confirmations = formatConfirmationRequirement(currency);
+  return confirmations ? `Credited after ${confirmations}\n` : "";
+}
+
 function formatDepositsHelp(commands, currencies) {
   const commandMap = getCommandIds(commands);
   const depositDetails = formatCurrencyMinimums(
@@ -101,7 +113,12 @@ function formatDepositsHelp(commands, currencies) {
       c.emoji +
       "\n(" +
       decimals +
-      " decimal places)\n\n",
+      " decimal places)\n" +
+      // Settlement time differs sharply between networks - a single quorum
+      // confirmation on Nano versus ten blocks on Monero - so it belongs
+      // alongside the amount rather than buried in a generic note.
+      formatCurrencyConfirmations(c) +
+      "\n",
   );
 
   return (
@@ -111,7 +128,10 @@ function formatDepositsHelp(commands, currencies) {
       commandMap[COMMAND_KEYS.RECEIVE]
     }>!\n\n` +
     depositDetails +
-    formatConfirmationMessage("deposit") +
+    formatConfirmationMessage(
+      "deposit",
+      "their credited funds and block hash",
+    ) +
     formatSpamMessage("deposits")
   );
 }
@@ -291,27 +311,37 @@ function formatGiftHelp(commands, currencies) {
   );
 }
 
+function formatShareCommandList(commandMap) {
+  const commands = [];
+  if (process.env.GUILD_INTENTS_GRANTED === "true") {
+    commands.push(
+      `</${COMMAND_KEYS.AWARD}:${commandMap[COMMAND_KEYS.AWARD]}>`,
+    );
+  }
+  commands.push(
+    `</${COMMAND_KEYS.DROP}:${commandMap[COMMAND_KEYS.DROP]}>`,
+    `</${COMMAND_KEYS.GIFT}:${commandMap[COMMAND_KEYS.GIFT]}>`,
+    `</${COMMAND_KEYS.RAIN}:${commandMap[COMMAND_KEYS.RAIN]}>`,
+  );
+  if (commands.length === 1) {
+    return commands[0];
+  }
+  return `${commands.slice(0, -1).join(", ")} and ${commands[commands.length - 1]}`;
+}
+
 function formatGeneralHelp(commands) {
   const commandMap = getCommandIds(commands);
 
-  let message =
-    "## Nanobot is a feature-rich Discord bot that gives every user their own wallet to collect and share currencies feelessly with friends and family.\n" +
+  return (
+    "## Nanobot is a feature-rich Discord bot that gives every user their own wallet to collect and share currencies with friends and family. Transfers between users are feeless; on-chain withdrawals follow each network's fees.\n" +
     `### Users can use <@${process.env.BOT_USER_ID}>'s slash (/) commands through direct message or within any server that hosts Nanobot.\n` +
     `### With this bot, users can easily </${COMMAND_KEYS.RECEIVE}:${commandMap[COMMAND_KEYS.RECEIVE]}> and </${COMMAND_KEYS.SEND}:${commandMap[COMMAND_KEYS.SEND]}> currencies from their </wallet:${commandMap[COMMAND_KEYS.WALLET]}> to on-chain addresses.\n` +
-    `### Currencies can be shared with </${COMMAND_KEYS.DROP}:${commandMap[COMMAND_KEYS.DROP]}>, </${COMMAND_KEYS.GIFT}:${commandMap[COMMAND_KEYS.GIFT]}> and </${COMMAND_KEYS.RAIN}:${commandMap[COMMAND_KEYS.RAIN]}> in any channel on Discord!\n` +
+    `### Currencies can be shared with ${formatShareCommandList(commandMap)} in any channel on Discord!\n` +
     `### Currencies can also be shared in your server through an interactive faucet, enabling the users in your server to </${COMMAND_KEYS.FISH}:${commandMap[COMMAND_KEYS.FISH]}> for currency-themed creatures!\n` +
     `### To vote for our bot and help grow our community, visit https://top.gg/bot/${process.env.BOT_USER_ID}.\n` +
     `### To invite our bot to a server, visit ${process.env.BOT_INVITE_URL}.\n` +
-    `-# To learn more about this bot or to view our Terms of Service or Privacy Policy, visit ${process.env.WEBSITE_URL}.`;
-
-  if (process.env.GUILD_INTENTS_GRANTED === "true") {
-    message = message.replace(
-      "### Currencies can be shared with </${COMMAND_KEYS.DROP}:${commandMap[COMMAND_KEYS.DROP]}>, </${COMMAND_KEYS.GIFT}:${commandMap[COMMAND_KEYS.GIFT]}> and </${COMMAND_KEYS.RAIN}:${commandMap[COMMAND_KEYS.RAIN]}>",
-      `### Currencies can be shared with </${COMMAND_KEYS.AWARD}:${commandMap[COMMAND_KEYS.AWARD]}>, </${COMMAND_KEYS.DROP}:${commandMap[COMMAND_KEYS.DROP]}>, </${COMMAND_KEYS.GIFT}:${commandMap[COMMAND_KEYS.GIFT]}> and </${COMMAND_KEYS.RAIN}:${commandMap[COMMAND_KEYS.RAIN]}>`,
-    );
-  }
-
-  return message;
+    `-# To learn more about this bot or to view our Terms of Service or Privacy Policy, visit ${process.env.WEBSITE_URL}.`
+  );
 }
 
 function formatRainHelp(commands, currencies) {
@@ -413,14 +443,37 @@ function formatSupportHelp() {
   );
 }
 
-function formatUpdatesHelp(commands) {
+function formatUpdatesHelp(commands, currencies) {
   const commandMap = getCommandIds(commands);
+  const representativeNames = [];
+  const settlementLines = [];
+  for (const key in currencies ?? {}) {
+    const c = currencies[key];
+    if (c?.enabled && c.name && c.supportsRepresentative !== false) {
+      representativeNames.push(c.name);
+      const confirmations = formatConfirmationRequirement(c);
+      if (confirmations) {
+        settlementLines.push(`**${c.name}** settles after ${confirmations}.`);
+      }
+    }
+  }
+  const representativeNote =
+    representativeNames.length > 0
+      ? `### Representative updates apply to ${representativeNames.join(
+          ", ",
+        )}. Currencies without a representative cannot use this command.\n`
+      : "";
+  const settlementNote =
+    settlementLines.length > 0 ? `${settlementLines.join("\n")}\n` : "";
+
   return (
     `## Users can update the representative of their </${
       COMMAND_KEYS.RECEIVE
     }:${commandMap[COMMAND_KEYS.RECEIVE]}> address with </${
       COMMAND_KEYS.UPDATE
     }:${commandMap[COMMAND_KEYS.UPDATE]}>.\n` +
+    representativeNote +
+    settlementNote +
     "### Here are some example commands:\n" +
     "- /update `address: nano_3kmnt...`\n" +
     "  - This will update the representative of your Nano deposit address to nano_3knmt...\n" +
@@ -433,16 +486,23 @@ function formatUpdatesHelp(commands) {
 
 function formatWithdrawalsHelp(commands, currencies) {
   const commandMap = getCommandIds(commands);
+  // The fee is deducted from the amount sent, so the amount a user must clear is
+  // the configured minimum plus the current fee estimate. Quoting the bare
+  // minimumWithdraw would advertise a figure the network cannot actually settle.
   const withdrawDetails = formatCurrencyMinimums(
     currencies,
     commandMap,
-    (c) => c.minimumWithdraw,
+    (c) => getEffectiveMinimumWithdraw(c),
     (c, formatted, decimals) =>
       `### The minimum </${COMMAND_KEYS.WALLET}:${
         commandMap[COMMAND_KEYS.WALLET]
       }> withdraw amount for **${c.name.toUpperCase()}**:\n` +
       `**${formatted} ${c.ticker.toUpperCase()}** ${c.emoji}\n` +
-      `(${decimals} decimal places)\n`,
+      `(${decimals} decimal places)\n` +
+      // Same fee and settlement copy as /currencies: on a chain with fees the
+      // recipient gets less than the requested amount.
+      formatNetworkNotice(c) +
+      "\n",
   );
 
   return (

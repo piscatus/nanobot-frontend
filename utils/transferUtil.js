@@ -12,6 +12,8 @@ const {
   getDollarsTotal,
   getCurrencyDollarValue,
   getCurrencyDecimalValue,
+  formatConfirmationRequirement,
+  formatNetworkNotice,
 } = require("./currencyUtil.js");
 const { getCommandIds } = require("./commandUtil.js");
 const { COLORS, EMOJIS } = require("./constants.js");
@@ -268,10 +270,28 @@ function getConfirmationInfo(opts) {
 
   if (command === COMMAND_KEYS.SEND || command === COMMAND_KEYS.WITHDRAW) {
     output += `### ${EMOJIS.ADDRESS_PIN} __Withdrawal Address__\n> \`${address}\`\n`;
+
+    // Fee and settlement disclosure before confirming: on a chain with fees the
+    // recipient gets less than the requested amount, and settlement time varies
+    // by network. Driven by the currency document, so feeless chains get the
+    // reassuring version and a new currency needs no change here.
+    const withdrawalCurrency =
+      wallets.length === 1 ? currencyMap.get(wallets[0].ticker) : null;
+    if (withdrawalCurrency) {
+      output += formatNetworkNotice(withdrawalCurrency) + "\n";
+    }
   }
 
   if (command === COMMAND_KEYS.UPDATE) {
     output += `### ${EMOJIS.ADDRESS_PIN} __Representative Address__\n> \`${address}\`\n`;
+    const updateCurrency =
+      wallets.length === 1 ? currencyMap.get(wallets[0].ticker) : null;
+    const confirmations = formatConfirmationRequirement(updateCurrency);
+    // Representative changes are on-chain but not a transfer, so the fee notice
+    // would be misleading. Settlement time still belongs here.
+    if (confirmations) {
+      output += `**Settles after ${confirmations}.**\n`;
+    }
   }
 
   let customColor = COLORS.NANOBOT_BLUE;
@@ -301,6 +321,7 @@ function getTransferInfo(
   currencies,
   creatures,
   eachFlag,
+  username = null,
 ) {
   try {
     let isWalletTransfer = false;
@@ -308,7 +329,10 @@ function getTransferInfo(
     let isBotTransfer = false;
     let transferEmojis = "";
     const commandMap = getCommandIds(commands);
-    const transferMessage = `<@${userId}> used </${command}:${commandMap[command]}>`;
+    // Mention plus plain username when supplied: an uncached member renders as a
+    // raw id, leaving other readers unable to tell who ran the command.
+    const executor = username ? `<@${userId}> (${username})` : `<@${userId}>`;
+    const transferMessage = `${executor} used </${command}:${commandMap[command]}>`;
     let transferDollarValue = "(≈$";
     let transferValue = "**";
     let totalValue = new BigNumber("0");
@@ -487,6 +511,47 @@ async function executeTransferWithConfirmation(interaction, options) {
 }
 
 /**
+ * Totals every recipient's completed transfer into one wallet and item list.
+ *
+ * <p>The executor is debited the sum of what all recipients received, so the sum
+ * is what "Wallet Debits" must show. Reading a single recipient's entry happens
+ * to be right for a one-recipient gift, but for a rain across N users it
+ * understates the debit by a factor of N.
+ *
+ * @param {object} completedTransfers - keyed by recipient user id
+ * @returns {{ wallets: Array, items: Array }}
+ */
+function sumCompletedTransfers(completedTransfers) {
+  const walletTotals = new Map();
+  const itemTotals = new Map();
+
+  for (const transfer of Object.values(completedTransfers ?? {})) {
+    for (const wallet of transfer?.wallets ?? []) {
+      const previous = walletTotals.get(wallet.ticker) ?? new BigNumber(0);
+      walletTotals.set(
+        wallet.ticker,
+        previous.plus(new BigNumber(wallet.raw ?? "0")),
+      );
+    }
+    for (const item of transfer?.items ?? []) {
+      const previous = itemTotals.get(item.name) ?? 0;
+      itemTotals.set(item.name, previous + (item.quantity ?? 0));
+    }
+  }
+
+  return {
+    wallets: [...walletTotals.entries()].map(([ticker, raw]) => ({
+      ticker,
+      raw: raw.toFixed(0),
+    })),
+    items: [...itemTotals.entries()].map(([name, quantity]) => ({
+      name,
+      quantity,
+    })),
+  };
+}
+
+/**
  * Posts transfer message to channel, sends receipt to user, and logs to system/guild channels.
  * Used by gift, award, rain commands.
  *
@@ -546,7 +611,9 @@ async function postTransferMessageAndLog(interaction, client, options) {
     finalMessage + `\n` + `${transferInfo.transferNote}`,
   );
 
-  const completedTransfer = Object.values(completedPrimaryTransfers)[0];
+  // Totalled across recipients, not read from the first one: the executor was
+  // debited the sum, which is what the receipt and log need to report.
+  const completedTransfer = sumCompletedTransfers(completedPrimaryTransfers);
   const receiptEmbed = getConfirmationInfo({
     userId: interaction.user.id,
     input,
@@ -693,6 +760,7 @@ module.exports = {
   executeTransferWithConfirmation,
   getConfirmationInfo,
   getTransferInfo,
+  sumCompletedTransfers,
   postTransferMessageAndLog,
   postTransferReceiptAndLog,
 };

@@ -8,7 +8,10 @@ const {
   COMMAND_OPTION_KEYS,
   EMOJIS,
 } = require("../../utils/constants.js");
-const { formatCurrencies } = require("../../utils/currencyUtil.js");
+const {
+  buildCurrencyPanels,
+  formatCurrencies,
+} = require("../../utils/currencyUtil.js");
 const { buildEmbed } = require("../../utils/embedUtil.js");
 const {
   executeReadOnlyEmbedCommand,
@@ -28,6 +31,9 @@ module.exports = {
     return executeReadOnlyEmbedCommand(interaction, client, {
       commandKey: COMMAND_KEYS.CURRENCIES,
       apiCall: (guildId, userId) => currenciesAPI(guildId, userId),
+      buildPanels: (data) =>
+        buildCurrencyPanels(data.currencies, data.commands),
+      // Used for the public "post as message" path, which stays a static embed.
       buildEmbed: (data) =>
         buildEmbed({
           color: COLORS.NANOBOT_BLUE,

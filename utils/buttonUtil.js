@@ -3,6 +3,7 @@ const { v4: uuidv4 } = require("uuid");
 const { BUTTON_DESCRIPTIONS, COLORS, EMOJIS, TIME } = require("./constants.js");
 const { buildEmbed } = require("./embedUtil.js");
 const { formatErrorTitle } = require("./errorUtil.js");
+const { safeDeferUpdate } = require("./interactionUtil.js");
 
 function shuffleCaptchaEmojis(arr) {
   const a = [...arr];
@@ -102,7 +103,7 @@ async function swapCollectorCreator(
     if (cooldownExpiry && Date.now() < cooldownExpiry) return;
 
     client.buttonCooldowns.set(userId, Date.now() + 1000);
-    await i.deferUpdate();
+    if (!(await safeDeferUpdate(i))) return;
 
     if (i.customId === homeButton) {
       currentEmbed = buildEmbed({
@@ -204,6 +205,103 @@ exports.swap = async function (
     subordinateList,
     subRow,
   );
+};
+
+const CAROUSEL_BUTTONS_PER_ROW = 5;
+const CAROUSEL_MAXIMUM_PANELS = 25;
+
+/**
+ * Paged embed with one button per page. Unlike swap, which toggles between
+ * exactly two panels, this scales to any number of currencies, so adding a coin
+ * does not require touching the UI.
+ *
+ * @param {Array<{title: string, color: string, content: string, textContent?: string, list?: object, url?: string}>} panels
+ */
+exports.carousel = async function (interaction, client, panels) {
+  const pages = panels.slice(0, CAROUSEL_MAXIMUM_PANELS);
+  if (pages.length === 0) return;
+
+  const buildPageEmbed = (page) =>
+    buildEmbed({
+      color: page.color,
+      title: page.title,
+      description: page.content,
+      fields: page.list,
+      url: page.url,
+    });
+
+  if (pages.length === 1) {
+    return interaction.editReply({
+      content: pages[0].textContent ?? null,
+      embeds: [buildPageEmbed(pages[0])],
+      components: [],
+    });
+  }
+
+  const buttonIds = pages.map(() => uuidv4());
+
+  const buildRows = (activeIndex) => {
+    const rows = [];
+    for (
+      let start = 0;
+      start < pages.length;
+      start += CAROUSEL_BUTTONS_PER_ROW
+    ) {
+      const row = new ActionRowBuilder().addComponents(
+        pages
+          .slice(start, start + CAROUSEL_BUTTONS_PER_ROW)
+          .map((page, offset) => {
+            const index = start + offset;
+            return new ButtonBuilder()
+              .setCustomId(buttonIds[index])
+              .setLabel(page.label ?? page.title)
+              .setStyle(
+                index === activeIndex
+                  ? ButtonStyle.Primary
+                  : ButtonStyle.Secondary,
+              )
+              .setDisabled(index === activeIndex);
+          }),
+      );
+      rows.push(row);
+    }
+    return rows;
+  };
+
+  const render = (index) => ({
+    content: pages[index].textContent ?? null,
+    embeds: [buildPageEmbed(pages[index])],
+    components: buildRows(index),
+  });
+
+  const interactionReply = await interaction.editReply({
+    ...render(0),
+    fetchReply: true,
+  });
+
+  const buttonIdSet = new Set(buttonIds);
+  const collector = interactionReply.createMessageComponentCollector({
+    filter: (i) =>
+      buttonIdSet.has(i.customId) && i.user.id === interaction.user.id,
+    time: TIME.SECONDS_PER_MINUTE * TIME.MILLISECONDS_PER_SECOND,
+  });
+
+  collector.on("collect", async (i) => {
+    const cooldownExpiry = client.buttonCooldowns.get(i.user.id);
+    if (cooldownExpiry && Date.now() < cooldownExpiry) return;
+    client.buttonCooldowns.set(i.user.id, Date.now() + 1000);
+    if (!(await safeDeferUpdate(i))) return;
+
+    const index = buttonIds.indexOf(i.customId);
+    if (index < 0) return;
+    await interaction.editReply(render(index));
+  });
+
+  collector.on("end", async () => {
+    try {
+      await interaction.editReply({ components: [] });
+    } catch (e) {}
+  });
 };
 
 exports.confirm = async function (interaction, command, embed) {

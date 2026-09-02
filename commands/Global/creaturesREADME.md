@@ -11,7 +11,12 @@
 
 ## Logic Flow
 
-1. `executeReadOnlyEmbedCommand`: API call `creaturesAPI(guildId, userId)` → status check → build embed via `formatCreatures`, `formatCreatureCommands` → `respondWithEmbed` with `getAdminMessageOptions`
+1. `executeReadOnlyEmbedCommand`: API call `creaturesAPI(guildId, userId)` → status check → `buildCreaturePanels` → `carousel` with an `ALL` page plus one page per currency that has creatures
+
+Filter pages come from the tickers present on the creature list, so a currency
+with no creatures gets no page and a new currency appears automatically. When the
+admin `message` option is used the reply is posted publicly as a single static
+embed, since a component collector is scoped to the requesting user.
 
 ## Options
 

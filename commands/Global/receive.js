@@ -1,5 +1,5 @@
 const { SlashCommandBuilder } = require("@discordjs/builders");
-const { swap } = require("../../utils/buttonUtil.js");
+const { carousel } = require("../../utils/buttonUtil.js");
 const {
   COMMAND_DESCRIPTIONS,
   COMMAND_KEYS,
@@ -8,7 +8,7 @@ const { catchCommandException } = require("../../utils/errorUtil.js");
 const { getInteractionContext } = require("../../utils/interactionUtil.js");
 const { executeWithStatusCheck } = require("../../utils/statusUtil.js");
 const {
-  buildReceiveSwapParams,
+  buildReceivePanels,
 } = require("../../utils/receiveUtil.js");
 const { execute: receiveAPI } = require("../../requests/receive.js");
 
@@ -26,22 +26,9 @@ module.exports = {
       );
       if (!response) return;
 
-      const params = buildReceiveSwapParams(response.data, userId);
+      const panels = buildReceivePanels(response.data, userId);
 
-      return swap(
-        interaction,
-        client,
-        params.color1,
-        params.color2,
-        params.title1,
-        params.address1,
-        params.content1,
-        params.field1,
-        params.title2,
-        params.address2,
-        params.content2,
-        params.field2,
-      );
+      return carousel(interaction, client, panels);
     } catch (err) {
       await catchCommandException(
         interaction,

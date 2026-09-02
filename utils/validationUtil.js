@@ -15,11 +15,10 @@ const INPUT_TOO_LONG_MESSAGE =
   " characters.";
 
 const ADDRESS_TOO_LONG_MESSAGE =
-  "Invalid Address: The address is too long! Banano or Nano addresses are " +
-  (NUMBERS.ADDRESS_LENGTH_MAXIMUM - 1) +
-  " or " +
+  "Invalid Address: The address is too long! No supported currency uses an " +
+  "address longer than " +
   NUMBERS.ADDRESS_LENGTH_MAXIMUM +
-  " characters in length, respectively.";
+  " characters.";
 
 async function validateInputLength(interaction, input, commandKey) {
   if (input.length <= NUMBERS.MAXIMUM_INPUT_LENGTH) return true;

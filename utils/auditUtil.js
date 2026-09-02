@@ -10,7 +10,12 @@ const { formatWallet, getSortedWallet } = require("./walletUtil.js");
 const BigNumber = require("bignumber.js");
 BigNumber.config({ DECIMAL_PLACES: 30, EXPONENTIAL_AT: 10 });
 
-function formatAudit(data) {
+/**
+ * @param {object} data - audit API response
+ * @param {boolean} [reveal] - show concealed currencies. Owner only; the caller
+ *   is responsible for the permission check.
+ */
+function formatAudit(data, reveal = false) {
   const {
     bonuses,
     currencies,
@@ -20,6 +25,20 @@ function formatAudit(data) {
     drops,
     guildsWallets,
   } = data;
+
+  // Privacy coins are withheld unless explicitly revealed. Driven by the
+  // currency document rather than a ticker check, so any future privacy coin
+  // behaves the same way without touching this file.
+  const concealedTickers = reveal
+    ? null
+    : new Set(
+        (currencies ?? [])
+          .filter((currency) => currency.concealBalances)
+          .map((currency) => currency.ticker.toUpperCase()),
+      );
+
+  const isConcealed = (ticker) =>
+    Boolean(concealedTickers && concealedTickers.has(ticker.toUpperCase()));
 
   let formatted = "";
 
@@ -245,6 +264,8 @@ function formatAudit(data) {
         })),
         currencies,
       ),
+      false,
+      concealedTickers,
     );
 
     if (formattedWallets.length > 0) {
@@ -317,6 +338,8 @@ function formatAudit(data) {
   if (consolidatedGrandWallets.length > 0) {
     const formattedWallets = formatWallet(
       getSortedWallet(consolidatedGrandWallets, currencies),
+      false,
+      concealedTickers,
     );
     const walletItems = Array.isArray(formattedWallets)
       ? formattedWallets
@@ -334,19 +357,23 @@ function formatAudit(data) {
 
   currencies.forEach((currency) => {
     const ticker = currency.ticker.toUpperCase();
-    if (
-      currency.liquidity !== null &&
-      currency.liquidity !== undefined &&
-      currency.liquidity.length >= 0
-    ) {
-      const raw = new BigNumber(currency.liquidity);
-      hotTotals[ticker] = raw;
-    }
+    // Treat a missing liquidity value as zero rather than skipping the
+    // currency, so a coin the bot holds none of still shows up and still counts
+    // against the liquidity check.
+    const raw = new BigNumber(currency.liquidity ?? "0");
+    hotTotals[ticker] = raw.isNaN() ? new BigNumber(0) : raw;
   });
 
   let isLiquid = true;
 
   for (const [symbol, grandValue] of Object.entries(grandWalletMap)) {
+    // A concealed currency is excluded from the public solvency check on
+    // purpose: a liquid/illiquid verdict that depended on it would leak whether
+    // reserves cover liabilities, which is information about the balance.
+    if (isConcealed(symbol)) {
+      continue;
+    }
+
     const hotValue = hotTotals[symbol];
 
     if (!hotValue) {
@@ -360,38 +387,49 @@ function formatAudit(data) {
     }
   }
 
-  // --- Total Wallets ---
-  const nonZeroHotWallets = Object.entries(hotTotals).filter(
-    ([_, total]) => !total.isZero(),
-  );
+  // Every enabled currency is listed, including empty ones. An audit that
+  // silently omits a currency holding nothing cannot be used to confirm the
+  // currency is actually being tracked.
+  const hotWalletEntries = Object.entries(hotTotals).map(([ticker, raw]) => ({
+    ticker,
+    raw: raw.toString(),
+  }));
 
-  if (nonZeroHotWallets.length > 0) {
+  if (hotWalletEntries.length > 0) {
     const formattedWallets = formatWallet(
-      getSortedWallet(
-        nonZeroHotWallets.map(([ticker, raw]) => ({
-          ticker,
-          raw: raw.toString(),
-        })),
-        currencies,
-      ),
+      getSortedWallet(hotWalletEntries, currencies),
+      true,
+      concealedTickers,
     );
 
-    if (formattedWallets.length > 0) {
+    const walletItems = Array.isArray(formattedWallets)
+      ? formattedWallets
+      : [formattedWallets];
+
+    if (walletItems.length > 0) {
       let walletString = "";
-      for (const item of formattedWallets) {
+      for (const item of walletItems) {
         walletString += `${item.name}\n${item.value}\n`;
       }
       formatted += "## Hot Wallets\n" + walletString;
     }
   }
 
-  const liquidityStatus = isLiquid
-    ? "## The Bot is Liquid ✅"
-    : "## The Bot is Illiquid ❌";
+  const concealedCount = concealedTickers ? concealedTickers.size : 0;
+
+  const liquidityStatus =
+    (isLiquid ? "## The Bot is Liquid ✅" : "## The Bot is Illiquid ❌") +
+    (concealedCount > 0
+      ? "\n-# Private currencies are withheld from this report and excluded " +
+        "from the liquidity check. Run this command with the reveal option as " +
+        "the bot owner for the full figures."
+      : "");
 
   return buildEmbed({
     color: isLiquid ? COLORS.LIQUID_GREEN : COLORS.ERROR_RED,
-    title: `${EMOJIS.AUDIT_NOTES} ${COMMAND_DESCRIPTIONS.AUDIT}`,
+    title:
+      `${EMOJIS.AUDIT_NOTES} ${COMMAND_DESCRIPTIONS.AUDIT}` +
+      (reveal ? " (Full)" : ""),
     description: formatted + liquidityStatus,
   });
 }

@@ -1,11 +1,16 @@
 const {
+  buildCurrencyChoices,
   getCurrencyDollarValue,
   getCurrencyDecimalValue,
+  getDecimalPlaces,
+  getEffectiveMinimumWithdraw,
   getDollarsTotal,
+  formatConfirmationRequirement,
   formatCurrencyMessage,
   formatCurrencyReceiveMessage,
   formatCurrencySendMessage,
   formatCurrencyTransferMessage,
+  formatNetworkNotice,
 } = require("./currencyUtil.js");
 
 describe("currencyUtil", () => {
@@ -21,6 +26,104 @@ describe("currencyUtil", () => {
 
     it("returns integer string when result has no fractional part", () => {
       expect(getCurrencyDollarValue(2, 1, 2)).toBe("2");
+    });
+  });
+
+  describe("getDecimalPlaces", () => {
+    // The three legacy shapes, where the old precision-minus-length form agreed.
+    it("matches the legacy result for a single significant digit", () => {
+      expect(getDecimalPlaces("1", 30)).toBe(30);
+      expect(getDecimalPlaces("100000000000000000000000", 30)).toBe(7);
+      expect(getDecimalPlaces("100", 12)).toBe(10);
+    });
+
+    // The case the legacy form got wrong: a computed, fee-inclusive floor.
+    it("counts every place for a multi-digit amount", () => {
+      expect(getDecimalPlaces("60000001", 12)).toBe(12);
+    });
+
+    it("clamps to zero when the amount exceeds one whole unit", () => {
+      expect(getDecimalPlaces("1000000000000000", 12)).toBe(0);
+    });
+
+    it("tolerates missing input", () => {
+      expect(getDecimalPlaces(null, 12)).toBe(12);
+    });
+  });
+
+  describe("getEffectiveMinimumWithdraw", () => {
+    it("adds the fee estimate to the configured minimum", () => {
+      expect(
+        getEffectiveMinimumWithdraw({
+          minimumWithdraw: "1",
+          feeEstimate: "60000000",
+        }),
+      ).toBe("60000001");
+    });
+
+    it("returns the minimum unchanged on a feeless currency", () => {
+      expect(getEffectiveMinimumWithdraw({ minimumWithdraw: "1" })).toBe("1");
+    });
+  });
+
+  describe("formatConfirmationRequirement", () => {
+    it("uses the singular for a single confirmation", () => {
+      expect(formatConfirmationRequirement({ confirmations: "1" })).toBe(
+        "1 network confirmation",
+      );
+    });
+
+    it("uses the plural beyond one", () => {
+      expect(formatConfirmationRequirement({ confirmations: "10" })).toBe(
+        "10 network confirmations",
+      );
+    });
+
+    // "0" is a truthy string, so a naive check rendered "after 0 confirmations".
+    it("returns null for zero or missing", () => {
+      expect(formatConfirmationRequirement({ confirmations: "0" })).toBeNull();
+      expect(formatConfirmationRequirement({})).toBeNull();
+    });
+
+    it("emits no markdown, so callers can emphasise the sentence", () => {
+      expect(formatConfirmationRequirement({ confirmations: "10" })).not.toContain(
+        "*",
+      );
+    });
+  });
+
+  describe("formatNetworkNotice", () => {
+    it("mentions a single confirmation on a feeless currency", () => {
+      const notice = formatNetworkNotice({
+        name: "Nano",
+        ticker: "xno",
+        confirmations: "1",
+      });
+      expect(notice).toContain("feeless");
+      expect(notice).toContain("Settles after 1 network confirmation.");
+    });
+
+    it("omits the settlement line when confirmations is zero", () => {
+      const notice = formatNetworkNotice({
+        name: "Nano",
+        ticker: "xno",
+        confirmations: "0",
+      });
+      expect(notice).toContain("feeless");
+      expect(notice).not.toContain("Settles after");
+    });
+
+    it("mentions fee and confirmations together on a fee-bearing currency", () => {
+      const notice = formatNetworkNotice({
+        name: "Monero",
+        ticker: "xmr",
+        precision: 12,
+        value: "150",
+        feeEstimate: "60000000",
+        confirmations: "10",
+      });
+      expect(notice).toContain("Network Fee");
+      expect(notice).toContain("Settles after 10 network confirmations.");
     });
   });
 
@@ -117,6 +220,63 @@ describe("currencyUtil", () => {
       ];
       const msg = formatCurrencyTransferMessage(commands);
       expect(msg).toContain("</award:a1>");
+    });
+  });
+
+  describe("buildCurrencyChoices", () => {
+    const nano = { ticker: "XNO", name: "Nano", enabled: true };
+    const banano = { ticker: "BAN", name: "Banano", enabled: true };
+    const monero = { ticker: "XMR", name: "Monero", enabled: true };
+
+    const creatures = [
+      { name: "Shrimp", ticker: "XNO" },
+      { name: "Shark", ticker: "XNO" },
+      { name: "Seahorse", ticker: "BAN" },
+    ];
+
+    it("labels each choice as 'Name [TICKER]' and sorts by ticker", () => {
+      expect(buildCurrencyChoices([nano, banano], creatures)).toEqual([
+        { name: "Banano [BAN]", value: "BAN" },
+        { name: "Nano [XNO]", value: "XNO" },
+      ]);
+    });
+
+    it("omits currencies that have no creatures yet", () => {
+      const choices = buildCurrencyChoices([nano, banano, monero], creatures);
+      expect(choices.map((choice) => choice.value)).not.toContain("XMR");
+    });
+
+    it("includes a currency as soon as it has a creature", () => {
+      const choices = buildCurrencyChoices(
+        [nano, banano, monero],
+        [...creatures, { name: "Mole", ticker: "XMR" }],
+      );
+      expect(choices).toContainEqual({ name: "Monero [XMR]", value: "XMR" });
+    });
+
+    it("omits disabled currencies", () => {
+      const choices = buildCurrencyChoices(
+        [nano, { ...banano, enabled: false }],
+        creatures,
+      );
+      expect(choices.map((choice) => choice.value)).toEqual(["XNO"]);
+    });
+
+    it("caps the list at the 25 choices Discord allows", () => {
+      const many = Array.from({ length: 30 }, (unused, index) => ({
+        ticker: `T${String(index).padStart(2, "0")}`,
+        name: `Coin ${index}`,
+        enabled: true,
+      }));
+      const stocked = many.map((currency) => ({ ticker: currency.ticker }));
+
+      expect(buildCurrencyChoices(many, stocked)).toHaveLength(25);
+    });
+
+    it("returns nothing when either list is missing", () => {
+      expect(buildCurrencyChoices(null, null)).toEqual([]);
+      expect(buildCurrencyChoices([nano, banano], null)).toEqual([]);
+      expect(buildCurrencyChoices(null, creatures)).toEqual([]);
     });
   });
 });

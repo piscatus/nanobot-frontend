@@ -7,6 +7,7 @@ const {
 } = require("../../utils/constants.js");
 const {
   buildAliasesEmbed,
+  buildAliasesPanels,
   formatDMErrorMessage,
 } = require("../../utils/aliasesUtil.js");
 const { buildEmbed } = require("../../utils/embedUtil.js");
@@ -48,6 +49,9 @@ module.exports = {
       commandKey: COMMAND_KEYS.ALIASES,
       apiCall: (guildId, userId) =>
         aliasesAPI(guildId, userId, subcommand === COMMAND_OPTION_KEYS.GLOBAL),
+      buildPanels: (data) =>
+        buildAliasesPanels(subcommand, interaction.guildId ?? null, data),
+      // Used for the public "post as message" path, which stays a static embed.
       buildEmbed: (data) =>
         buildAliasesEmbed(subcommand, interaction.guildId ?? null, data),
       ...getAdminMessageOptions(interaction),

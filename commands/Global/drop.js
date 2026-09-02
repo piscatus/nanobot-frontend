@@ -236,6 +236,7 @@ module.exports = {
             winners,
             confirmed,
             input,
+            interaction.user.username,
           ),
         statusCommandKey: COMMAND_KEYS.DROP,
         confirmCommandKey: COMMAND_KEYS.DROP,
@@ -295,6 +296,7 @@ module.exports = {
         currencies,
         creatures,
         false,
+        interaction.user.username,
       );
 
       const prefinalMessage =

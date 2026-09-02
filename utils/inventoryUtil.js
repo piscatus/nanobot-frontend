@@ -1,9 +1,12 @@
 const dollarValueDecimals = 8;
+const { formatMergeMessage } = require("./commandUtil.js");
 const {
   COLORS,
   COMMAND_DESCRIPTIONS,
+  COMMAND_KEYS,
   EMOJIS,
 } = require("./constants.js");
+const { isValidString } = require("./stringUtil.js");
 const {
   formatCreatureBonusMessage,
   formatCreatureFishingMessage,
@@ -158,6 +161,127 @@ function formatInventoryContent(commands) {
   );
 }
 
+/** Distinct currency tickers present in a sorted inventory array. */
+function getInventoryTickers(itemArray) {
+  if (!Array.isArray(itemArray)) return [];
+  return [
+    ...new Set(
+      itemArray
+        .filter((item) => item && item.quantity > 0)
+        .map((item) => item.creatureTicker),
+    ),
+  ].sort();
+}
+
+/**
+ * ALL panel plus one per currency present, for a single inventory owner.
+ * Filters are omitted when the inventory spans fewer than two currencies, since
+ * they would just duplicate the overview.
+ */
+function buildOwnerPanels(options) {
+  const { itemArray, title, description, displayCapacity, labelPrefix } =
+    options;
+
+  const panels = [
+    {
+      label: `${labelPrefix}ALL`,
+      title,
+      color: COLORS.NANOBOT_BLUE,
+      content: description,
+      list: formatInventory(itemArray, displayCapacity),
+    },
+  ];
+
+  const tickers = getInventoryTickers(itemArray);
+  if (tickers.length < 2) {
+    return panels;
+  }
+
+  for (const ticker of tickers) {
+    panels.push({
+      label: `${labelPrefix}${ticker.toUpperCase()}`,
+      title,
+      color: COLORS.NANOBOT_BLUE,
+      content: description,
+      list: formatInventory(
+        itemArray.filter((item) => item.creatureTicker === ticker),
+        displayCapacity,
+      ),
+    });
+  }
+  return panels;
+}
+
+/**
+ * Panels for the /inventory filter buttons.
+ *
+ * <p>When a subordinate account is linked, its panels are appended with a SUB
+ * prefix rather than merged into the same embed. Merging would risk exceeding
+ * Discord's 25 field limit on the unfiltered view, since each creature type is
+ * its own field.
+ */
+function buildInventoryPanels(data, username) {
+  const { bonuses, commands, creatures, currencies, userDetails } = data;
+  const subordinateUserId = userDetails?.subordinateUserId ?? null;
+
+  const userItemArray = getSortedInventory(
+    data.userItems,
+    creatures,
+    currencies,
+    bonuses,
+  );
+
+  const sellNote =
+    userItemArray?.length > 0 ? formatCreatureSaleMessage(commands) : "";
+  const transferNote =
+    userItemArray?.length > 0 ? formatCreatureTransferMessage(commands) : "";
+
+  const actionMessages =
+    `${transferNote}` +
+    "\n" +
+    `${formatInventoryContent(commands)}` +
+    "\n" +
+    `${sellNote}`;
+
+  const title = `${EMOJIS.INVENTORY_CABINET} ${username}'s ${COMMAND_DESCRIPTIONS.INVENTORY}`;
+
+  const panels = buildOwnerPanels({
+    itemArray: userItemArray,
+    title,
+    description: actionMessages,
+    displayCapacity: true,
+    labelPrefix: "",
+  });
+
+  if (!isValidString(subordinateUserId)) {
+    return panels;
+  }
+
+  const subordinateItemArray = getSortedInventory(
+    data.subordinateItems,
+    creatures,
+    currencies,
+    bonuses,
+  );
+
+  panels.push(
+    ...buildOwnerPanels({
+      itemArray: subordinateItemArray,
+      title: `${EMOJIS.SUBORDINATE} Subordinate's ${COMMAND_DESCRIPTIONS.INVENTORY}`,
+      description: formatMergeMessage(
+        commands,
+        subordinateUserId,
+        COMMAND_KEYS.CREATURES,
+        COMMAND_KEYS.INVENTORY,
+      ),
+      displayCapacity: false,
+      labelPrefix: "SUB ",
+    }),
+  );
+
+  return panels;
+}
+
 function buildInventoryEmbed(data, username) {
   const { bonuses, commands, creatures, currencies, userDetails } = data;
 
@@ -204,6 +328,8 @@ function buildInventoryEmbed(data, username) {
 
 module.exports = {
   buildInventoryEmbed,
+  buildInventoryPanels,
+  getInventoryTickers,
   formatInventory,
   formatInventoryContent,
   getInventorySaleWallet,

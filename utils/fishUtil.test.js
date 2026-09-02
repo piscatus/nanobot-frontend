@@ -125,4 +125,5 @@ describe("fishUtil", () => {
       expect(msg).toContain("caught an **EEL**");
     });
   });
+
 });

@@ -11,6 +11,7 @@ module.exports = {
     random,
     confirmation,
     input,
+    username,
   ) {
     return apiRequest("put", "/requests/drop", {
       channelId,
@@ -21,6 +22,7 @@ module.exports = {
       random,
       roleId,
       userId,
+      username,
       users,
     });
   },

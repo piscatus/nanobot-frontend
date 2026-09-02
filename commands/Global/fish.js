@@ -4,6 +4,8 @@ const { formatRequestTitleMessage } = require("../../utils/commandUtil.js");
 const {
   COMMAND_DESCRIPTIONS,
   COMMAND_KEYS,
+  COMMAND_OPTION_DESCRIPTIONS,
+  COMMAND_OPTION_KEYS,
   EMOJIS,
   STATUS_CODES,
 } = require("../../utils/constants.js");
@@ -12,11 +14,15 @@ const {
   catchCommandException,
   formatErrorTitle,
 } = require("../../utils/errorUtil.js");
+const { buildCurrencyChoices } = require("../../utils/currencyUtil.js");
 const {
   formatFishLogMessage,
   formatFishCatchMessage,
 } = require("../../utils/fishUtil.js");
-const { getInteractionContext } = require("../../utils/interactionUtil.js");
+const {
+  getInteractionContext,
+  safeDeferUpdate,
+} = require("../../utils/interactionUtil.js");
 const { checkStatuses } = require("../../utils/statusUtil.js");
 const { isValidString } = require("../../utils/stringUtil.js");
 const { getConfirmationInfo } = require("../../utils/transferUtil.js");
@@ -159,11 +165,11 @@ async function runFishSuccess(interaction, client, response) {
   }
 }
 
-async function handleCaptchaSuccess(interaction, client) {
+async function handleCaptchaSuccess(interaction, client, ticker = null) {
   const { guildId, userId } = getInteractionContext(interaction);
   if (!userId) return;
 
-  await interaction.deferUpdate();
+  if (!(await safeDeferUpdate(interaction))) return;
 
   await verificationsApi.completeAfterCaptcha(userId);
 
@@ -171,6 +177,7 @@ async function handleCaptchaSuccess(interaction, client) {
     guildId,
     userId,
     interaction.member?.roles?.cache?.map((r) => r.id) ?? null,
+    ticker,
   );
 
   if (
@@ -187,16 +194,43 @@ async function handleCaptchaSuccess(interaction, client) {
   await runFishSuccess(interaction, client, response);
 }
 
+function buildFishCommand(currencyChoices) {
+  const builder = new SlashCommandBuilder()
+    .setName(COMMAND_KEYS.FISH)
+    .setDescription(COMMAND_DESCRIPTIONS.FISH)
+    .setDMPermission(false);
+
+  if (currencyChoices?.length) {
+    builder.addStringOption((option) =>
+      option
+        .setName(COMMAND_OPTION_KEYS.CURRENCY)
+        .setDescription(COMMAND_OPTION_DESCRIPTIONS.FISH_CURRENCY)
+        .setRequired(false)
+        .addChoices(...currencyChoices),
+    );
+  }
+
+  return builder;
+}
+
 module.exports = {
   handleCaptchaSuccess,
   runFishSuccess,
-  data: new SlashCommandBuilder()
-    .setName(COMMAND_KEYS.FISH)
-    .setDescription(COMMAND_DESCRIPTIONS.FISH)
-    .setDMPermission(false),
+  data: buildFishCommand(),
+  /**
+   * Discord fixes a command's choices when it is deployed, so the currency list
+   * is resolved from the API once at startup. Without it the command deploys
+   * with no option at all and fishing still works, just untargeted.
+   */
+  buildData({ currencies, creatures } = {}) {
+    return buildFishCommand(buildCurrencyChoices(currencies, creatures));
+  },
   async execute(interaction, client) {
     try {
       const { guildId, userId } = getInteractionContext(interaction);
+      const ticker = interaction.options.getString(
+        COMMAND_OPTION_KEYS.CURRENCY,
+      );
 
       const checkResponse = await verificationsApi.check(userId);
 
@@ -205,6 +239,7 @@ module.exports = {
           guildId,
           userId ?? null,
           interaction.member.roles.cache.map((r) => r.id) ?? null,
+          ticker,
         );
 
         if (
@@ -245,7 +280,8 @@ module.exports = {
         emojisList,
         {
           commandKey: COMMAND_KEYS.FISH,
-          onCaptchaSuccess: handleCaptchaSuccess,
+          onCaptchaSuccess: (captchaInteraction, captchaClient) =>
+            handleCaptchaSuccess(captchaInteraction, captchaClient, ticker),
         },
       );
     } catch (err) {

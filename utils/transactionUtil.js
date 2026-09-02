@@ -1,11 +1,135 @@
-﻿const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
+﻿const {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  StringSelectMenuBuilder,
+} = require("discord.js");
 const { v4: uuidv4 } = require("uuid");
 const { getCommandIds } = require("./commandUtil.js");
-const { COLORS, COMMAND_KEYS, EMOJIS } = require("./constants.js");
-const { getDollarsTotal } = require("./currencyUtil.js");
+const {
+  BROWSE_WINDOW_MILLISECONDS,
+  COLORS,
+  COMMAND_KEYS,
+  EMOJIS,
+  FILTER_ALL,
+  MAXIMUM_SELECT_OPTIONS,
+  TRANSACTION_FILTERS,
+} = require("./constants.js");
+const {
+  getDollarsTotal,
+  getExplorerTxUrl,
+} = require("./currencyUtil.js");
 const { buildEmbed } = require("./embedUtil.js");
 const { getSortedInventory, formatInventory } = require("./inventoryUtil.js");
 const { getSortedWallet, formatWallet } = require("./walletUtil.js");
+
+/** One transaction fills a page; each renders far too much to pack in more. */
+const PAGE_SIZE = 1;
+
+/** Transactions of one kind. The ALL sentinel and a blank value match every kind. */
+function filterTransactions(transactions, filterValue) {
+  const list = Array.isArray(transactions) ? transactions : [];
+  if (!filterValue || filterValue === FILTER_ALL) {
+    return list;
+  }
+  return list.filter((transaction) => transaction?.command === filterValue);
+}
+
+/**
+ * Filter choices for one user's history, each carrying its own count.
+ *
+ * <p>Only kinds the user actually has are offered. Listing every possible kind
+ * would bury the two deposits someone is hunting for among six empty entries,
+ * which is the problem the filter exists to solve. `selectedValue` is kept even
+ * at a count of zero so an explicitly requested filter still shows as active.
+ */
+function buildTransactionFilterOptions(transactions, selectedValue) {
+  const list = Array.isArray(transactions) ? transactions : [];
+
+  const counts = new Map();
+  list.forEach((transaction) => {
+    const command = transaction?.command;
+    if (command) {
+      counts.set(command, (counts.get(command) ?? 0) + 1);
+    }
+  });
+
+  const known = TRANSACTION_FILTERS.filter((filter) =>
+    counts.has(filter.value),
+  );
+
+  const unknown = [...counts.keys()]
+    .filter(
+      (command) => !TRANSACTION_FILTERS.some((f) => f.value === command),
+    )
+    .sort()
+    .map((command) => ({
+      value: command,
+      label: command.charAt(0).toUpperCase() + command.slice(1),
+      emoji: EMOJIS.COMMAND_SATELLITE,
+    }));
+
+  const options = [
+    {
+      value: FILTER_ALL,
+      label: "All Transactions",
+      emoji: EMOJIS.TRANSACTION_LIST,
+      count: list.length,
+    },
+    ...[...known, ...unknown].map((filter) => ({
+      ...filter,
+      count: counts.get(filter.value) ?? 0,
+    })),
+  ];
+
+  const missing =
+    selectedValue &&
+    selectedValue !== FILTER_ALL &&
+    !options.some((option) => option.value === selectedValue);
+
+  if (missing) {
+    const preset = TRANSACTION_FILTERS.find((f) => f.value === selectedValue);
+    options.push({
+      value: selectedValue,
+      label: preset?.label ?? selectedValue,
+      emoji: preset?.emoji ?? EMOJIS.COMMAND_SATELLITE,
+      count: 0,
+    });
+  }
+
+  return options.slice(0, MAXIMUM_SELECT_OPTIONS);
+}
+
+exports.filterTransactions = filterTransactions;
+exports.buildTransactionFilterOptions = buildTransactionFilterOptions;
+
+/** Tells the reader which slice they are in and how much of the whole it is. */
+function formatTransactionFooter(
+  filterOptions,
+  filterValue,
+  pageIndex,
+  totalPages,
+  matchCount,
+  totalCount,
+) {
+  const parts = [`Page ${pageIndex + 1} of ${totalPages}`];
+
+  if (filterValue && filterValue !== FILTER_ALL) {
+    const active = filterOptions.find(
+      (option) => option.value === filterValue,
+    );
+    parts.unshift(active?.label ?? filterValue);
+    parts.push(`${matchCount} of ${totalCount} transactions`);
+  } else {
+    parts.push(
+      `${totalCount} transaction${totalCount === 1 ? "" : "s"}`,
+    );
+  }
+
+  return parts.join(" • ");
+}
+
+exports.formatTransactionFooter = formatTransactionFooter;
 
 exports.paginateTransactions = async function (
   interaction,
@@ -17,97 +141,129 @@ exports.paginateTransactions = async function (
   currencies,
   creatures,
   bonuses,
+  initialFilter = null,
 ) {
-  let currentPage = 0;
-  const pageSize = 1;
+  const allTransactions = Array.isArray(transactions) ? transactions : [];
+
+  // Numbering follows the whole history, so an entry keeps the number it had
+  // in the unfiltered list no matter which filter is applied to reach it.
+  const numbersById = new Map(
+    allTransactions.map((transaction, index) => [
+      transaction?.id,
+      allTransactions.length - index,
+    ]),
+  );
+
+  const state = {
+    filter: initialFilter || FILTER_ALL,
+    page: 0,
+  };
+
+  const filterOptions = buildTransactionFilterOptions(
+    allTransactions,
+    state.filter,
+  );
 
   const ids = {
+    filter: uuidv4(),
     first: uuidv4(),
     prev: uuidv4(),
     next: uuidv4(),
     last: uuidv4(),
   };
 
-  const buildRow = () => {
-    return new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId(ids.first)
-        .setLabel(EMOJIS.REWIND_ARROW)
-        .setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder()
-        .setCustomId(ids.prev)
-        .setLabel(EMOJIS.BACK_ARROW)
-        .setStyle(ButtonStyle.Primary),
-      new ButtonBuilder()
-        .setCustomId(ids.next)
-        .setLabel(EMOJIS.FORWARD_ARROW)
-        .setStyle(ButtonStyle.Primary),
-      new ButtonBuilder()
-        .setCustomId(ids.last)
-        .setLabel(EMOJIS.FASTFORWARD_ARROW)
-        .setStyle(ButtonStyle.Secondary),
+  const buildComponents = (totalPages) => {
+    const rows = [];
+
+    // One choice is not a filter. The menu only earns its row once there is
+    // more than one kind of transaction to switch between.
+    if (filterOptions.length > 1) {
+      rows.push(
+        new ActionRowBuilder().addComponents(
+          new StringSelectMenuBuilder()
+            .setCustomId(ids.filter)
+            .setPlaceholder("Filter by transaction type")
+            .addOptions(
+              filterOptions.map((option) => ({
+                label: `${option.label} (${option.count})`,
+                value: option.value,
+                emoji: option.emoji,
+                default: option.value === state.filter,
+              })),
+            ),
+        ),
+      );
+    }
+
+    const atFirst = state.page <= 0;
+    const atLast = state.page >= totalPages - 1;
+
+    rows.push(
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(ids.first)
+          .setLabel(EMOJIS.REWIND_ARROW)
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(atFirst),
+        new ButtonBuilder()
+          .setCustomId(ids.prev)
+          .setLabel(EMOJIS.BACK_ARROW)
+          .setStyle(ButtonStyle.Primary)
+          .setDisabled(atFirst),
+        new ButtonBuilder()
+          .setCustomId(ids.next)
+          .setLabel(EMOJIS.FORWARD_ARROW)
+          .setStyle(ButtonStyle.Primary)
+          .setDisabled(atLast),
+        new ButtonBuilder()
+          .setCustomId(ids.last)
+          .setLabel(EMOJIS.FASTFORWARD_ARROW)
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(atLast),
+      ),
     );
+
+    return rows;
   };
 
-  const embed = getTransactionEmbed(
-    title,
-    currentPage,
-    transactions,
-    commands,
-    userId,
-    currencies,
-    creatures,
-    bonuses,
-    pageSize,
-  );
+  const render = () => {
+    const matches = filterTransactions(allTransactions, state.filter);
+    const totalPages = Math.max(Math.ceil(matches.length / PAGE_SIZE), 1);
 
-  await transactionCollectorCreator(
-    client,
-    interaction,
-    embed,
-    ids,
-    transactions,
-    currentPage,
-    pageSize,
-    buildRow,
-    title,
-    commands,
-    userId,
-    currencies,
-    creatures,
-    bonuses,
-  );
-};
+    // A filter change can leave the old page past the end of the new list.
+    state.page = Math.min(Math.max(state.page, 0), totalPages - 1);
 
-async function transactionCollectorCreator(
-  client,
-  interaction,
-  embed,
-  allIds,
-  transactions,
-  currentPage,
-  pageSize,
-  buildRow,
-  title,
-  commands,
-  userId,
-  currencies,
-  creatures,
-  bonuses,
-) {
-  const filter = (i) =>
-    Object.values(allIds).includes(i.customId) &&
-    i.user.id === interaction.user.id;
+    return {
+      embeds: [
+        getTransactionEmbed({
+          title,
+          pageIndex: state.page,
+          transactions: matches,
+          totalCount: allTransactions.length,
+          numbersById,
+          filterOptions,
+          filterValue: state.filter,
+          commands,
+          userId,
+          currencies,
+          creatures,
+          bonuses,
+        }),
+      ],
+      components: buildComponents(totalPages),
+    };
+  };
 
   const replyEmbed = await interaction.editReply({
-    embeds: [embed],
-    components: [buildRow()],
+    ...render(),
     fetchReply: true,
   });
 
   const collector = replyEmbed.createMessageComponentCollector({
-    filter,
-    time: 60000,
+    filter: (i) =>
+      Object.values(ids).includes(i.customId) &&
+      i.user.id === interaction.user.id,
+    time: BROWSE_WINDOW_MILLISECONDS,
   });
 
   collector.on("collect", async (i) => {
@@ -116,42 +272,30 @@ async function transactionCollectorCreator(
     if (cooldownExpiry && Date.now() < cooldownExpiry) return;
     client.buttonCooldowns.set(uid, Date.now() + 1000);
 
-    const maxPage = Math.max(
-      Math.floor((transactions.length - 1) / pageSize),
-      0,
-    );
+    const matches = filterTransactions(allTransactions, state.filter);
+    const maxPage = Math.max(Math.ceil(matches.length / PAGE_SIZE) - 1, 0);
 
     switch (i.customId) {
-      case allIds.first:
-        currentPage = 0;
+      case ids.filter:
+        // A different filter makes the old position meaningless, so restart.
+        state.filter = i.values?.[0] ?? FILTER_ALL;
+        state.page = 0;
         break;
-      case allIds.prev:
-        currentPage = Math.max(currentPage - 1, 0);
+      case ids.first:
+        state.page = 0;
         break;
-      case allIds.next:
-        currentPage = Math.min(currentPage + 1, maxPage);
+      case ids.prev:
+        state.page = Math.max(state.page - 1, 0);
         break;
-      case allIds.last:
-        currentPage = maxPage;
+      case ids.next:
+        state.page = Math.min(state.page + 1, maxPage);
+        break;
+      case ids.last:
+        state.page = maxPage;
         break;
     }
 
-    const newEmbed = getTransactionEmbed(
-      title,
-      currentPage,
-      transactions,
-      commands,
-      userId,
-      currencies,
-      creatures,
-      bonuses,
-      pageSize,
-    );
-
-    await i.update({
-      embeds: [newEmbed],
-      components: [buildRow()],
-    });
+    await i.update(render());
   });
 
   collector.on("end", async () => {
@@ -159,19 +303,22 @@ async function transactionCollectorCreator(
       await interaction.editReply({ components: [] });
     } catch (e) {}
   });
-}
+};
 
-function getTransactionEmbed(
+function getTransactionEmbed({
   title,
   pageIndex,
   transactions,
+  totalCount,
+  numbersById,
+  filterOptions,
+  filterValue,
   commands,
   userId,
   currencies,
   creatures,
   bonuses,
-  pageSize,
-) {
+}) {
   title = title || "Transaction History";
   pageIndex = Number.isInteger(pageIndex) && pageIndex >= 0 ? pageIndex : 0;
   transactions = Array.isArray(transactions) ? transactions : [];
@@ -180,11 +327,13 @@ function getTransactionEmbed(
   currencies = currencies || {};
   creatures = creatures || {};
   bonuses = bonuses || {};
+  filterOptions = Array.isArray(filterOptions) ? filterOptions : [];
+  numbersById = numbersById instanceof Map ? numbersById : new Map();
 
-  const start = pageIndex * pageSize;
-  const page = transactions.slice(start, start + pageSize);
-  const totalPages = Math.max(Math.ceil(transactions.length / pageSize), 1);
-  const totalTransactions = transactions.length;
+  const matchCount = transactions.length;
+  const start = pageIndex * PAGE_SIZE;
+  const page = transactions.slice(start, start + PAGE_SIZE);
+  const totalPages = Math.max(Math.ceil(matchCount / PAGE_SIZE), 1);
 
   let fields = "";
 
@@ -242,22 +391,26 @@ function getTransactionEmbed(
       ? `\n${EMOJIS.INPUT_KEYBOARD} __Input__\n> \`${t.input}\``
       : "";
 
-    const currency = t.blockHash
-      ? currencies.find(
-          (c) =>
-            c.ticker ===
-            t.completedPrimaryTransfers[
-              Object.keys(t.completedPrimaryTransfers)[0]
-            ].wallets[0].ticker,
-        )
-      : {};
+    // The ticker comes from the wallet debits recorded on the transaction, which
+    // is what identifies the chain a /send or /receive settled on.
+    const debitedTicker = t.blockHash
+      ? t.completedPrimaryTransfers?.[
+          Object.keys(t.completedPrimaryTransfers)[0]
+        ]?.wallets?.[0]?.ticker
+      : null;
 
+    const currency = debitedTicker
+      ? currencies.find((c) => c.ticker === debitedTicker)
+      : null;
+
+    const explorerUrl = getExplorerTxUrl(currency, t.blockHash);
+
+    // Monero has no account explorer and other chains may have none configured,
+    // so fall back to the bare hash rather than a dead link.
     const commandAddress = t.blockHash
-      ? `\n${EMOJIS.CHAIN_HASH} __Block Hash__\n> [${
-          t.blockHash
-        }](https://nanexplorer.com/${currency.name.toLowerCase()}/blocks/${
-          t.blockHash
-        })`
+      ? `\n${EMOJIS.CHAIN_HASH} __Block Hash__\n> ${
+          explorerUrl ? `[${t.blockHash}](${explorerUrl})` : `\`${t.blockHash}\``
+        }`
       : "";
 
     const uniqueIdentifier = `${EMOJIS.UNIQUE_ID} __Unique Identifier__\n> \`${t.id}\``;
@@ -429,12 +582,21 @@ function getTransactionEmbed(
       }
     }
 
-    fields +=
-      `## __User Transaction #${totalTransactions - (start + idx)}__\n` + value;
+    const number =
+      (t.id ? numbersById.get(t.id) : null) ?? matchCount - (start + idx);
+
+    fields += `## __User Transaction #${number}__\n` + value;
   });
 
   if (fields.length === 0) {
-    fields += `**No Transactions in the Last 30 Days**`;
+    const active = filterOptions.find(
+      (option) => option.value === filterValue,
+    );
+    const label =
+      filterValue && filterValue !== FILTER_ALL
+        ? active?.label ?? filterValue
+        : "Transactions";
+    fields += `**No ${label} in the Last 30 Days**`;
   }
 
   return buildEmbed({
@@ -446,7 +608,14 @@ function getTransactionEmbed(
       }> and </${COMMAND_KEYS.WALLET}:${
         commandMap[COMMAND_KEYS.WALLET]
       }> to view your *current* balances!\n` + fields,
-    footer: `Page ${pageIndex + 1} of ${totalPages}`,
+    footer: formatTransactionFooter(
+      filterOptions,
+      filterValue,
+      pageIndex,
+      totalPages,
+      matchCount,
+      Number.isInteger(totalCount) ? totalCount : matchCount,
+    ),
   });
 }
 

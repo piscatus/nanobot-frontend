@@ -164,8 +164,8 @@ function formatAliasMessage(intro, location, commands) {
   return message;
 }
 
-function buildAliasesEmbed(subcommand, guildId, data) {
-  const listContent = formatAliases(data.aliases, data.currencies);
+/** Shared title and description so the embed and the filter panels agree. */
+function buildAliasesHeader(subcommand, guildId, data) {
   let embedContent = "\n\n";
 
   const serverAliases = `${capitalize(COMMAND_OPTION_KEYS.SERVER)} ${capitalize(COMMAND_KEYS.ALIASES)}`;
@@ -187,16 +187,79 @@ function buildAliasesEmbed(subcommand, guildId, data) {
       : EMOJIS.ALIASES_HOME;
   const title = `${emoji} ${capitalize(subcommand)} ${COMMAND_DESCRIPTIONS.ALIASES}`;
 
+  return { title, description: embedContent };
+}
+
+function buildAliasesEmbed(subcommand, guildId, data) {
+  const { title, description } = buildAliasesHeader(subcommand, guildId, data);
+
   return buildEmbed({
     color: COLORS.NANOBOT_BLUE,
     title,
-    description: embedContent,
-    fields: listContent,
+    description,
+    fields: formatAliases(data.aliases, data.currencies),
   });
+}
+
+/**
+ * Filter panels for /aliases: an overview plus one panel per currency that
+ * actually has aliases. Tickers come from the alias list, so a currency with no
+ * aliases gets no panel and a new currency appears on its own.
+ */
+function buildAliasesPanels(subcommand, guildId, data) {
+  const { title, description } = buildAliasesHeader(subcommand, guildId, data);
+  const { aliases, currencies } = data;
+
+  const allPanel = {
+    label: "ALL",
+    title,
+    color: COLORS.NANOBOT_BLUE,
+    content: description,
+    list: formatAliases(aliases, currencies),
+  };
+
+  if (!Array.isArray(aliases) || !Array.isArray(currencies)) {
+    return [allPanel];
+  }
+
+  const enabledByTicker = new Map(
+    currencies.filter((c) => c.enabled).map((c) => [c.ticker, c]),
+  );
+
+  const tickers = [
+    ...new Set(
+      aliases
+        .map((alias) => alias.ticker)
+        .filter((ticker) => enabledByTicker.has(ticker)),
+    ),
+  ].sort();
+
+  // A single currency makes the filters redundant with the overview.
+  if (tickers.length < 2) {
+    return [allPanel];
+  }
+
+  return [
+    allPanel,
+    ...tickers.map((ticker) => {
+      const currency = enabledByTicker.get(ticker);
+      return {
+        label: ticker.toUpperCase(),
+        title: `${currency.emoji} ${currency.name} ${COMMAND_DESCRIPTIONS.ALIASES}`,
+        color: currency.color,
+        content: description,
+        list: formatAliases(
+          aliases.filter((alias) => alias.ticker === ticker),
+          currencies,
+        ),
+      };
+    }),
+  ];
 }
 
 module.exports = {
   buildAliasesEmbed,
+  buildAliasesPanels,
   formatAliases,
   rawAmountFromAliasInput,
   formatAliasMessage,

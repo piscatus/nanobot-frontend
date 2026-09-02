@@ -132,7 +132,7 @@ module.exports = {
         1: {
           color: COLORS.NANOBOT_BLUE,
           title: EMOJIS.UPDATE_REPRESENTATIVE + " Updates",
-          content: formatUpdatesHelp(response.data.commands),
+          content: formatUpdatesHelp(response.data.commands, currencies),
         },
         0: {
           color: COLORS.NANOBOT_BLUE,

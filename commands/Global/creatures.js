@@ -9,6 +9,7 @@ const {
   EMOJIS,
 } = require("../../utils/constants.js");
 const {
+  buildCreaturePanels,
   formatCreatureCommands,
   formatCreatures,
 } = require("../../utils/creatureUtil.js");
@@ -31,6 +32,9 @@ module.exports = {
     return executeReadOnlyEmbedCommand(interaction, client, {
       commandKey: COMMAND_KEYS.CREATURES,
       apiCall: (guildId, userId) => creaturesAPI(guildId, userId),
+      buildPanels: (data) =>
+        buildCreaturePanels(data.creatures, data.currencies, data.commands),
+      // Used for the public "post as message" path, which stays a static embed.
       buildEmbed: (data) =>
         buildEmbed({
           color: COLORS.NANOBOT_BLUE,

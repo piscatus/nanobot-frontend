@@ -98,6 +98,8 @@ const COMMAND_OPTION_KEYS = Object.freeze({
   ALIAS_VALUE: "alias_value",
   CATEGORY: "category",
   CHANNEL: "channel",
+  CREATURE: "creature",
+  CURRENCY: "currency",
   DOCUMENTATION: "documentation",
   DURATION_MINUTES: "duration_minutes",
   DURATION_HOURS: "duration_hours",
@@ -113,9 +115,11 @@ const COMMAND_OPTION_KEYS = Object.freeze({
   MESSAGE: "message",
   RANDOM: "random",
   REMOVE_ALIAS: "remove_alias",
+  REVEAL: "reveal",
   ROLE: "role",
   SERVER: "server",
   TRANSFER_LOGGING_CHANNEL: "transfer_logging_channel",
+  TYPE: "type",
   USER: "user",
   USERS_ACTIVE: "users_active",
   USERS: "users",
@@ -145,12 +149,16 @@ const COMMAND_OPTION_DESCRIPTIONS = Object.freeze({
   DOCUMENTATION: "Select Documentation",
   DROP_INPUT: "What are you dropping?",
   EMOJI: "Enter an Emoji",
+  FISH_CURRENCY: "Fish for a specific currency's creatures",
   GIFT_INPUT: "What are you gifting?",
   HOURS: "Enter the Duration in Hours",
   HOURS_ACTIVE: "Enter the Last Activity in Hours",
+  LEADERBOARD_CREATURE: "Jump straight to one creature's leaderboard",
+  LEADERBOARD_CURRENCY: "Only show creatures for one currency",
   MESSAGE: "Send as a Message?",
   MINUTES: "Enter the Duration in Minutes",
   MINUTES_ACTIVE: "Enter the Last Activity in Minutes",
+  REVEAL: "Reveal private currency balances? (Bot Owner only)",
   RAIN_INPUT: "What are you raining?",
   RANDOM: "Enter a Random Number of Users",
   REPRESENTATIVE: "Enter Representative Address",
@@ -158,6 +166,7 @@ const COMMAND_OPTION_DESCRIPTIONS = Object.freeze({
   SELL_INPUT: "What are you selling?",
   SEND_INPUT: "What are you withdrawing?",
   STRING: "Enter a Message",
+  TRANSACTION_TYPE: "Only show one kind of transaction",
   USERS: "Enter the Number of Users",
   USER: "Select a User",
 });
@@ -226,6 +235,39 @@ const EMOJIS = Object.freeze({
   WITHDRAW_RECEIPT: "🧾",
 });
 
+/** Sentinel for the unfiltered view, so it can share the filter's value slot. */
+const FILTER_ALL = "all";
+
+/** Discord rejects a select menu carrying more than 25 options. */
+const MAXIMUM_SELECT_OPTIONS = 25;
+
+/**
+ * The kinds of transaction the /transactions filter offers, in display order.
+ *
+ * <p>`value` is the command recorded on the transaction record; only these
+ * commands write one today. A command missing from this list still gets a
+ * generated entry from the user's history, so nothing becomes unreachable if a
+ * new one starts recording transactions before it is added here.
+ */
+const TRANSACTION_FILTERS = Object.freeze([
+  {
+    value: COMMAND_KEYS.RECEIVE,
+    label: "Deposits",
+    emoji: EMOJIS.DEPOSIT_INBOX,
+  },
+  {
+    value: COMMAND_KEYS.SEND,
+    label: "Withdrawals",
+    emoji: EMOJIS.WITHDRAW_OUTGOING,
+  },
+  { value: COMMAND_KEYS.FISH, label: "Fishing", emoji: EMOJIS.FISHING_ROD },
+  { value: COMMAND_KEYS.SELL, label: "Sales", emoji: EMOJIS.SALE_BONUS },
+  { value: COMMAND_KEYS.GIFT, label: "Gifts", emoji: EMOJIS.GIFT_PRESENT },
+  { value: COMMAND_KEYS.RAIN, label: "Rains", emoji: EMOJIS.RAIN_CLOUD },
+  { value: COMMAND_KEYS.DROP, label: "Drops", emoji: EMOJIS.PARACHUTE_DROP },
+  { value: COMMAND_KEYS.MERGE, label: "Merges", emoji: EMOJIS.CYCLONE_SWAP },
+]);
+
 const ROLES = Object.freeze({
   ATTO: "atto",
   FEMTO: "femto",
@@ -262,11 +304,25 @@ const TIME = Object.freeze({
   SECONDS_PER_DAY,
 });
 
+/**
+ * How long the filter and page controls stay live on a paginated embed. One
+ * minute was not enough to read a page and decide where to go next, and the
+ * point of a filter is to browse. Discord invalidates the interaction token at
+ * fifteen minutes, so this stays well inside that.
+ */
+const BROWSE_WINDOW_MILLISECONDS =
+  5 * SECONDS_PER_MINUTE * MILLISECONDS_PER_SECOND;
+
 const DEFAULT_FISHING_FREQUENCY = 15;
 const DEFAULT_MINUTES_ACTIVE = 30;
 const DEFAULT_MINUTES_DROP = 30;
 const DEFAULT_USERS_ACTIVE = 40;
-const ADDRESS_LENGTH_MAXIMUM = 65; // nano_ + [52 chars account public key] + [8 char checksum]
+// Outer bound across every supported currency, not a per-currency rule. Discord
+// enforces setMaxLength client side, so this must fit the longest address any
+// enabled currency can produce or that coin becomes impossible to withdraw to.
+// Longest today is a Monero integrated address at 106; nano_ is 65, ban_ 64.
+// The exact per-currency check is the length-anchored regex in the API.
+const ADDRESS_LENGTH_MAXIMUM = 106;
 const MAXIMUM_ALIAS_LENGTH = 50;
 const MAXIMUM_DAYS_ACTIVE = 7;
 const MAXIMUM_DAYS_FISHING = 7;
@@ -335,17 +391,21 @@ const NUMBERS = Object.freeze({
 });
 
 module.exports = {
+  BROWSE_WINDOW_MILLISECONDS,
   BUTTON_DESCRIPTIONS,
   CHANNELS,
   COLORS,
+  MAXIMUM_SELECT_OPTIONS,
   COMMAND_KEYS,
   PRIVILEGED_ROLE_IDS,
   COMMAND_DESCRIPTIONS,
   COMMAND_OPTION_KEYS,
   COMMAND_OPTION_DESCRIPTIONS,
   EMOJIS,
+  FILTER_ALL,
   NUMBERS,
   ROLES,
   STATUS_CODES,
   TIME,
+  TRANSACTION_FILTERS,
 };
