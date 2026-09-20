@@ -1,6 +1,7 @@
 const {
   formatFishReminderMessage,
   formatFishCommandMessage,
+  formatFishDefaultMessage,
   formatFishCatchMessage,
   formatFishLogMessage,
 } = require("./fishUtil.js");
@@ -126,4 +127,35 @@ describe("fishUtil", () => {
     });
   });
 
+  describe("formatFishDefaultMessage", () => {
+    const commands = [{ name: COMMAND_KEYS.FISH, commandId: "fish1" }];
+    const currencies = [
+      { ticker: "XNO", name: "Nano", emoji: ":xno:" },
+      { ticker: "BAN", name: "Banano", emoji: ":ban:" },
+    ];
+
+    it("names the currency the user just defaulted to", () => {
+      const msg = formatFishDefaultMessage("BAN", currencies, commands);
+      expect(msg).toContain(":ban: **Banano [BAN]**");
+      expect(msg).toContain("</fish:fish1>");
+      expect(msg).toContain("`Any`");
+    });
+
+    it("says the default is cleared when there is no ticker", () => {
+      const msg = formatFishDefaultMessage(null, currencies, commands);
+      expect(msg).toContain("**any** currency's creatures");
+      expect(msg).not.toContain("`Any`");
+    });
+
+    it("falls back to the bare ticker for an unknown currency", () => {
+      const msg = formatFishDefaultMessage("XMR", currencies, commands);
+      expect(msg).toContain("**XMR**");
+    });
+
+    it("falls back to plain text when the fish command is missing", () => {
+      const msg = formatFishDefaultMessage("BAN", currencies, []);
+      expect(msg).toContain("/fish");
+      expect(msg).not.toContain("</fish:");
+    });
+  });
 });

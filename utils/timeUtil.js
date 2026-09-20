@@ -36,24 +36,31 @@ function dropDurationError() {
   );
 }
 
-function formatTime(minutes) {
-  if (minutes < TIME.MINUTES_PER_HOUR) {
-    return `${minutes} minute${minutes !== 1 ? "s" : ""}`;
+function formatTime(minutes, seconds) {
+  const mins = Number(minutes) || 0;
+  const secs = Number(seconds) || 0;
+
+  if (mins < TIME.MINUTES_PER_HOUR) {
+    if (mins === 0 && secs > 0) {
+      return formatUnit(secs, "second");
+    }
+    if (secs > 0) {
+      return formatUnit(mins, "minute") + " and " + formatUnit(secs, "second");
+    }
+    return formatUnit(mins, "minute");
   }
 
-  const days = Math.floor(minutes / TIME.MINUTES_PER_DAY);
+  const days = Math.floor(mins / TIME.MINUTES_PER_DAY);
   const hours = Math.floor(
-    (minutes % TIME.MINUTES_PER_DAY) / TIME.MINUTES_PER_HOUR,
+    (mins % TIME.MINUTES_PER_DAY) / TIME.MINUTES_PER_HOUR,
   );
-  const remainingMinutes = minutes % TIME.MINUTES_PER_HOUR;
+  const remainingMinutes = mins % TIME.MINUTES_PER_HOUR;
 
   const parts = [];
-  if (days) parts.push(`${days} day${days !== 1 ? "s" : ""}`);
-  if (hours) parts.push(`${hours} hour${hours !== 1 ? "s" : ""}`);
-  if (remainingMinutes)
-    parts.push(
-      `${remainingMinutes} minute${remainingMinutes !== 1 ? "s" : ""}`,
-    );
+  if (days) parts.push(formatUnit(days, "day"));
+  if (hours) parts.push(formatUnit(hours, "hour"));
+  if (remainingMinutes) parts.push(formatUnit(remainingMinutes, "minute"));
+  if (secs) parts.push(formatUnit(secs, "second"));
 
   if (parts.length === 1) return parts[0];
   if (parts.length === 2) return parts.join(" and ");

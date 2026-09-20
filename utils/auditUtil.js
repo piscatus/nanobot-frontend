@@ -1,439 +1,503 @@
 const { COLORS, COMMAND_DESCRIPTIONS, EMOJIS } = require("./constants.js");
+const {
+  getCurrencyDecimalValue,
+  getCurrencyDollarValue,
+} = require("./currencyUtil.js");
 const { buildEmbed } = require("./embedUtil.js");
 const {
   formatInventory,
-  getSortedInventory,
   getInventorySaleWallet,
+  getSortedInventory,
 } = require("./inventoryUtil.js");
-const { formatWallet, getSortedWallet } = require("./walletUtil.js");
+const { CONCEALED_PLACEHOLDER } = require("./walletUtil.js");
 
 const BigNumber = require("bignumber.js");
 BigNumber.config({ DECIMAL_PLACES: 30, EXPONENTIAL_AT: 10 });
 
+const dollarValueDecimals = 8;
+
+/** Stands in for a verdict on a currency excluded from the public check. */
+const CONCEALED_MARKER = "🔒";
+
 /**
- * @param {object} data - audit API response
- * @param {boolean} [reveal] - show concealed currencies. Owner only; the caller
- *   is responsible for the permission check.
+ * A raw amount as a BigNumber, treating an absent or unparseable value as zero
+ * rather than poisoning every total it is added into with NaN.
  */
-function formatAudit(data, reveal = false) {
-  const {
-    bonuses,
-    currencies,
-    creatures,
-    usersItems,
-    usersWallets,
-    drops,
-    guildsWallets,
-  } = data;
+function toRaw(value) {
+  const raw = new BigNumber(value ?? "0");
+  return raw.isNaN() ? new BigNumber(0) : raw;
+}
+
+/**
+ * A raw amount as a decimal string in the currency's own precision.
+ *
+ * <p>Fixed rather than stringified because a raw balance runs to tens of
+ * digits, and this module configures BigNumber to switch to exponential
+ * notation well below that.
+ */
+function getDecimalValue(raw, currency) {
+  return getCurrencyDecimalValue(
+    toRaw(raw).toFixed(0),
+    Number(currency.precision),
+  );
+}
+
+/**
+ * A raw amount rendered as "**1.23 XNO** ≈ $4.56", or as placeholders when the
+ * currency is concealed. The dollar value is withheld alongside the amount,
+ * since dividing it by the published exchange rate recovers the amount.
+ */
+function formatAmount(raw, currency, concealed) {
+  if (concealed) {
+    return `**${CONCEALED_PLACEHOLDER} ${currency.ticker}** ≈ $${CONCEALED_PLACEHOLDER}`;
+  }
+
+  const value = getDecimalValue(raw, currency);
+
+  return `**${value} ${currency.ticker}** ≈ $${getCurrencyDollarValue(
+    value,
+    currency.value,
+    dollarValueDecimals,
+  )}`;
+}
+
+/** One figure's dollar value summed across several currencies. */
+function sumDollars(entries, pick) {
+  const total = entries.reduce(
+    (running, entry) =>
+      running.plus(
+        getCurrencyDollarValue(
+          getDecimalValue(pick(entry), entry.currency),
+          entry.currency.value,
+          dollarValueDecimals,
+        ),
+      ),
+    new BigNumber(0),
+  );
+
+  return getCurrencyDollarValue(total, 1, dollarValueDecimals);
+}
+
+/**
+ * Wallet balances and creature counts across every source the audit covers:
+ * active drops, user inventories, user wallets, and server wallets.
+ *
+ * <p>Wallet totals are keyed by upper case ticker so a ticker differing only in
+ * case cannot split into two rows that each look solvent on their own.
+ */
+function computeAuditTotals(data) {
+  const walletTotals = {};
+  const itemTotals = {};
+
+  const addWallets = (wallets) => {
+    for (const wallet of wallets ?? []) {
+      const ticker = wallet.ticker.toUpperCase();
+      walletTotals[ticker] = (walletTotals[ticker] ?? new BigNumber(0)).plus(
+        toRaw(wallet.raw),
+      );
+    }
+  };
+
+  const addItems = (items) => {
+    for (const item of items ?? []) {
+      const name = item.name.toUpperCase();
+      itemTotals[name] = (itemTotals[name] ?? 0) + Number(item.quantity);
+    }
+  };
+
+  for (const drop of data.drops ?? []) {
+    addWallets(drop.transfer?.wallets);
+    addItems(drop.transfer?.items);
+  }
+
+  for (const entry of data.usersItems ?? []) {
+    addItems(entry.items);
+  }
+
+  for (const entry of data.usersWallets ?? []) {
+    addWallets(entry.wallets);
+  }
+
+  for (const entry of data.guildsWallets ?? []) {
+    addWallets(entry.wallets);
+  }
+
+  return { walletTotals, itemTotals };
+}
+
+/**
+ * Per-currency solvency position: everything credited to users and servers -
+ * wallet balances plus the sale value of every creature held - against the
+ * reserve the bot keeps in its hot wallet.
+ *
+ * <p>Tickers carrying a balance that no currency document describes are
+ * returned separately as `untracked`. They cannot be priced or backed, so they
+ * fail the liquidity check, and listing them is the only way that verdict is
+ * explicable: an unresolvable ticker is dropped from every formatted row, so
+ * the report would otherwise read as illiquid for no visible reason.
+ *
+ * @param {object} data - audit API response
+ * @param {boolean} [reveal] - include concealed currencies at their real
+ *   figures and in the liquidity verdict
+ */
+function getAuditLedger(data, reveal = false) {
+  const { bonuses, creatures, currencies } = data;
+  const { walletTotals, itemTotals } = computeAuditTotals(data);
+
+  const heldItems = Object.entries(itemTotals)
+    .filter(([, quantity]) => quantity !== 0)
+    .map(([name, quantity]) => ({ name, quantity }));
+
+  // A creature is credited in the currency it sells for, so its sale value is
+  // folded into the same figure as wallet balances.
+  const saleTotals = {};
+  for (const sale of getInventorySaleWallet(
+    heldItems,
+    creatures ?? [],
+    currencies ?? [],
+    bonuses ?? [],
+  )) {
+    const ticker = sale.ticker.toUpperCase();
+    saleTotals[ticker] = (saleTotals[ticker] ?? new BigNumber(0)).plus(
+      toRaw(sale.raw),
+    );
+  }
+
+  const creditedOf = (ticker) =>
+    (walletTotals[ticker] ?? new BigNumber(0)).plus(
+      saleTotals[ticker] ?? new BigNumber(0),
+    );
 
   // Privacy coins are withheld unless explicitly revealed. Driven by the
   // currency document rather than a ticker check, so any future privacy coin
   // behaves the same way without touching this file.
   const concealedTickers = reveal
-    ? null
+    ? new Set()
     : new Set(
         (currencies ?? [])
           .filter((currency) => currency.concealBalances)
           .map((currency) => currency.ticker.toUpperCase()),
       );
 
-  const isConcealed = (ticker) =>
-    Boolean(concealedTickers && concealedTickers.has(ticker.toUpperCase()));
+  const entries = (currencies ?? [])
+    // A disabled currency is still audited while anything is credited in it,
+    // since hiding it would drop a real balance out of the report.
+    .filter(
+      (currency) =>
+        currency.enabled || !creditedOf(currency.ticker.toUpperCase()).isZero(),
+    )
+    .map((currency) => {
+      const ticker = currency.ticker.toUpperCase();
+      const walletCredited = walletTotals[ticker] ?? new BigNumber(0);
+      const saleCredited = saleTotals[ticker] ?? new BigNumber(0);
+      const credited = walletCredited.plus(saleCredited);
+      // A missing liquidity value counts as zero rather than skipping the
+      // currency, so a coin the bot holds none of still shows up and still
+      // counts against the liquidity check.
+      const reserve = toRaw(currency.liquidity);
 
-  let formatted = "";
-
-  // === Prepare running totals ===
-  const totalItemTotals = {};
-  const totalWalletTotals = {};
-
-  // === Drops Totals ===
-  if (Array.isArray(drops) && drops.length > 0) {
-    const dropWalletTotals = {};
-    const dropItemTotals = {};
-
-    drops.forEach((drop) => {
-      const transfer = drop.transfer;
-      const wallets = transfer.wallets;
-      const items = transfer.items;
-
-      // Wallet totals from drops
-      for (const wallet of wallets) {
-        const walletTicker = wallet.ticker;
-        const walletRaw = new BigNumber(wallet.raw);
-        dropWalletTotals[walletTicker] = (
-          dropWalletTotals[walletTicker] || new BigNumber(0)
-        ).plus(walletRaw);
-        totalWalletTotals[walletTicker] = (
-          totalWalletTotals[walletTicker] || new BigNumber(0)
-        ).plus(walletRaw);
-      }
-
-      // Item totals from drops (integers)
-      for (const item of items) {
-        const itemName = item.name.toUpperCase();
-        const itemQuantity = Number(item.quantity);
-        dropItemTotals[itemName] =
-          (dropItemTotals[itemName] || 0) + itemQuantity;
-        totalItemTotals[itemName] =
-          (totalItemTotals[itemName] || 0) + itemQuantity;
-      }
-    });
-
-    // let formattedWalletString = "";
-    // if (Object.keys(dropWalletTotals).length > 0) {
-    //   const formattedWalletDrops = formatWallet(
-    //     getSortedWallet(
-    //       Object.entries(dropWalletTotals).map(([ticker, raw]) => ({
-    //         ticker,
-    //         raw: raw.toString(),
-    //       })),
-    //       currencies,
-    //     ),
-    //   );
-
-    //   for (const item of formattedWalletDrops) {
-    //     formattedWalletString += `${item.name}\n${item.value}\n`;
-    //   }
-    // }
-
-    // let formattedItemString = "";
-    // if (Object.keys(dropItemTotals).length > 0) {
-    //   const formattedItemDrops = formatInventory(
-    //     getSortedInventory(
-    //       Object.entries(dropItemTotals).map(([name, quantity]) => ({
-    //         name,
-    //         quantity,
-    //       })),
-    //       creatures,
-    //       currencies,
-    //       bonuses,
-    //     ),
-    //   );
-
-    //   for (const item of formattedItemDrops) {
-    //     formattedItemString += `${item.name}\n${item.value}\n`;
-    //   }
-    // }
-
-    // let finalDropString = "";
-    // if (formattedWalletString) finalDropString += formattedWalletString;
-    // if (formattedItemString) {
-    //   if (formattedWalletString) finalDropString += "\n";
-    //   finalDropString += formattedItemString;
-    // }
-
-    // formatted += "## Active Drops\n" + finalDropString;
-  }
-
-  // === User Items Totals ===
-  if (usersItems) {
-    const itemTotals = {};
-
-    usersItems.forEach((entry) => {
-      for (const creature of entry.items) {
-        const name = creature.name.toUpperCase();
-        const quantity = Number(creature.quantity);
-        itemTotals[name] = (itemTotals[name] || 0) + quantity;
-        totalItemTotals[name] = (totalItemTotals[name] || 0) + quantity;
-      }
-    });
-
-    // const nonZeroItems = Object.entries(itemTotals).filter(
-    //   ([_, qty]) => qty !== 0,
-    // );
-
-    // const formattedItems = formatInventory(
-    //   getSortedInventory(
-    //     nonZeroItems.map(([name, quantity]) => ({ name, quantity })),
-    //     creatures,
-    //     currencies,
-    //     bonuses,
-    //   ),
-    //   false,
-    // );
-
-    // let formattedString = "";
-    // if (formattedItems.length > 0) {
-    //   for (const item of formattedItems) {
-    //     formattedString += `${item.name}\n${item.value}\n`;
-    //   }
-    // } else {
-    //   formattedString += "No User Items\n";
-    // }
-
-    // formatted += "## User Items\n" + formattedString;
-  }
-
-  // === User Wallets Totals ===
-  if (usersWallets) {
-    const walletTotals = {};
-
-    usersWallets.forEach((entry) => {
-      for (const coin of entry.wallets) {
-        const ticker = coin.ticker;
-        const raw = new BigNumber(coin.raw);
-        walletTotals[ticker] = (walletTotals[ticker] || new BigNumber(0)).plus(
-          raw,
-        );
-        totalWalletTotals[ticker] = (
-          totalWalletTotals[ticker] || new BigNumber(0)
-        ).plus(raw);
-      }
-    });
-
-    // const nonZeroWallets = Object.entries(walletTotals).filter(
-    //   ([_, total]) => !total.isZero(),
-    // );
-
-    // const formattedWallets = formatWallet(
-    //   getSortedWallet(
-    //     nonZeroWallets.map(([ticker, raw]) => ({
-    //       ticker,
-    //       raw: raw.toString(),
-    //     })),
-    //     currencies,
-    //   ),
-    // );
-
-    // let formattedString = "";
-    // if (formattedWallets.length > 0) {
-    //   for (const item of formattedWallets) {
-    //     formattedString += `${item.name}\n${item.value}\n`;
-    //   }
-    // } else {
-    //   formattedString += "No User Wallets\n";
-    // }
-
-    // formatted += "## User Wallets\n" + formattedString;
-  }
-
-  // === Server Wallets Totals ===
-  if (guildsWallets) {
-    const guildTotals = {};
-
-    guildsWallets.forEach((entry) => {
-      for (const coin of entry.wallets) {
-        const ticker = coin.ticker;
-        const raw = new BigNumber(coin.raw);
-        guildTotals[ticker] = (guildTotals[ticker] || new BigNumber(0)).plus(
-          raw,
-        );
-        totalWalletTotals[ticker] = (
-          totalWalletTotals[ticker] || new BigNumber(0)
-        ).plus(raw);
-      }
-    });
-
-    // const nonZeroGuilds = Object.entries(guildTotals).filter(
-    //   ([_, total]) => !total.isZero(),
-    // );
-
-    // const formattedWallets = formatWallet(
-    //   getSortedWallet(
-    //     nonZeroGuilds.map(([ticker, raw]) => ({ ticker, raw: raw.toString() })),
-    //     currencies,
-    //   ),
-    // );
-
-    // let formattedString = "";
-    // if (formattedWallets.length > 0) {
-    //   for (const item of formattedWallets) {
-    //     formattedString += `${item.name}\n${item.value}\n`;
-    //   }
-    // } else {
-    //   formattedString += "No Server Wallets\n";
-    // }
-
-    // formatted += "## Server Wallets\n" + formattedString;
-  }
-
-  // === TOTAL ITEMS & TOTAL WALLETS (without sale value) ===
-  let totalString = "";
-
-  // --- Total Wallets ---
-  const nonZeroTotalWallets = Object.entries(totalWalletTotals).filter(
-    ([_, total]) => !total.isZero(),
-  );
-
-  if (nonZeroTotalWallets.length > 0) {
-    const formattedWallets = formatWallet(
-      getSortedWallet(
-        nonZeroTotalWallets.map(([ticker, raw]) => ({
-          ticker,
-          raw: raw.toString(),
-        })),
-        currencies,
-      ),
-      false,
-      concealedTickers,
+      return {
+        currency,
+        ticker,
+        concealed: concealedTickers.has(ticker),
+        walletCredited,
+        saleCredited,
+        credited,
+        reserve,
+        headroom: reserve.minus(credited),
+        isLiquid: reserve.isGreaterThanOrEqualTo(credited),
+      };
+    })
+    .sort(
+      (a, b) =>
+        a.ticker.localeCompare(b.ticker) ||
+        a.currency.name.localeCompare(b.currency.name),
     );
 
-    if (formattedWallets.length > 0) {
-      let walletString = "";
-      for (const item of formattedWallets) {
-        walletString += `${item.name}\n${item.value}\n`;
-      }
-      totalString += "## Total Wallets\n" + walletString;
-    }
-  }
-
-  // --- Total Items ---
-  const nonZeroTotalItems = Object.entries(totalItemTotals).filter(
-    ([_, qty]) => qty !== 0,
+  const trackedTickers = new Set(
+    (currencies ?? []).map((currency) => currency.ticker.toUpperCase()),
   );
 
-  if (nonZeroTotalItems.length > 0) {
-    const formattedItems = formatInventory(
+  const untracked = [
+    ...new Set([...Object.keys(walletTotals), ...Object.keys(saleTotals)]),
+  ]
+    .filter(
+      (ticker) => !trackedTickers.has(ticker) && !creditedOf(ticker).isZero(),
+    )
+    .sort()
+    .map((ticker) => ({ ticker, credited: creditedOf(ticker) }));
+
+  // A concealed currency is excluded from the public solvency check on purpose:
+  // a liquid/illiquid verdict that depended on it would leak whether the
+  // reserve covers what is credited, which is information about the balance.
+  const isLiquid =
+    untracked.length === 0 &&
+    entries.every((entry) => entry.concealed || entry.isLiquid);
+
+  return {
+    entries,
+    isLiquid,
+    items:
       getSortedInventory(
-        nonZeroTotalItems.map(([name, quantity]) => ({ name, quantity })),
-        creatures,
-        currencies,
-        bonuses,
-      ),
-      false,
+        heldItems,
+        creatures ?? [],
+        currencies ?? [],
+        bonuses ?? [],
+      ) ?? [],
+    untracked,
+  };
+}
+
+/**
+ * A concealed currency gets no verdict mark. Publishing one would disclose
+ * whether its reserve covers what is credited, which is information about the
+ * balance the currency is configured to withhold.
+ */
+function getVerdictMarker(entry) {
+  if (entry.concealed) {
+    return CONCEALED_MARKER;
+  }
+  return entry.isLiquid ? "✅" : "❌";
+}
+
+/** Verdict, then whatever qualifies it, as the summary panel's body text. */
+function formatSummaryNotes(ledger, hasFilters) {
+  const { entries, isLiquid, untracked } = ledger;
+
+  const notes = [
+    isLiquid ? "## The Bot is Liquid ✅" : "## The Bot is Illiquid ❌",
+  ];
+
+  if (untracked.length > 0) {
+    const tickers = untracked.map((entry) => entry.ticker).join(", ");
+    notes.push(
+      `-# ${tickers} ${
+        untracked.length === 1 ? "carries a balance" : "carry balances"
+      } that no configured currency describes, so the amount cannot be priced ` +
+        "or backed. This is why the report reads as illiquid.",
     );
-
-    if (formattedItems.length > 0) {
-      let itemString = "";
-      for (const item of formattedItems) {
-        itemString += `${item.name}\n${item.value}\n`;
-      }
-      totalString += "## Total Items\n" + itemString;
-    }
   }
 
-  if (totalString) formatted += totalString;
-
-  // === GRAND TOTALS (wallets + sale value) ===
-  const grandWalletMap = {};
-
-  // Add all total wallets
-  for (const [ticker, raw] of nonZeroTotalWallets) {
-    grandWalletMap[ticker] = new BigNumber(raw);
-  }
-
-  // Add sale value wallets from all items
-  if (nonZeroTotalItems.length > 0) {
-    const saleWallets = getInventorySaleWallet(
-      nonZeroTotalItems.map(([name, quantity]) => ({ name, quantity })),
-      creatures,
-      currencies,
-      bonuses,
+  if (entries.some((entry) => entry.concealed)) {
+    notes.push(
+      "-# Private currencies are withheld from this report and excluded from " +
+        "the liquidity check. Run this command with the reveal option as the " +
+        "bot owner for the full figures.",
     );
-
-    for (const walletEntry of saleWallets) {
-      const ticker = walletEntry.ticker;
-      const raw = new BigNumber(walletEntry.raw);
-      grandWalletMap[ticker] = (
-        grandWalletMap[ticker] || new BigNumber(0)
-      ).plus(raw);
-    }
   }
 
-  // Convert to array and format
-  const consolidatedGrandWallets = Object.entries(grandWalletMap).map(
-    ([ticker, raw]) => ({ ticker, raw: raw.toString() }),
-  );
-
-  if (consolidatedGrandWallets.length > 0) {
-    const formattedWallets = formatWallet(
-      getSortedWallet(consolidatedGrandWallets, currencies),
-      false,
-      concealedTickers,
-    );
-    const walletItems = Array.isArray(formattedWallets)
-      ? formattedWallets
-      : [formattedWallets];
-
-    let walletString = "";
-    for (const item of walletItems) {
-      walletString += `${item.name}\n${item.value}\n`;
-    }
-    formatted += "## Grand Totals\n" + walletString;
+  if (hasFilters) {
+    notes.push("-# Use the buttons below to audit a single currency.");
   }
 
-  // === HOT WALLETS ===
-  const hotTotals = {};
+  return notes.join("\n");
+}
 
-  currencies.forEach((currency) => {
-    const ticker = currency.ticker.toUpperCase();
-    // Treat a missing liquidity value as zero rather than skipping the
-    // currency, so a coin the bot holds none of still shows up and still counts
-    // against the liquidity check.
-    const raw = new BigNumber(currency.liquidity ?? "0");
-    hotTotals[ticker] = raw.isNaN() ? new BigNumber(0) : raw;
-  });
+/**
+ * The default panel: one row per currency showing what is credited against what
+ * is held, plus the overall verdict.
+ *
+ * <p>Deliberately fixed in size. The per-wallet and per-creature detail lives
+ * on the currency panels, so adding a currency or a creature cannot push the
+ * default view past Discord's embed limits.
+ */
+function buildSummaryPanel(ledger, reveal, hasFilters) {
+  const { entries, isLiquid, untracked } = ledger;
 
-  let isLiquid = true;
-
-  for (const [symbol, grandValue] of Object.entries(grandWalletMap)) {
-    // A concealed currency is excluded from the public solvency check on
-    // purpose: a liquid/illiquid verdict that depended on it would leak whether
-    // reserves cover liabilities, which is information about the balance.
-    if (isConcealed(symbol)) {
-      continue;
-    }
-
-    const hotValue = hotTotals[symbol];
-
-    if (!hotValue) {
-      isLiquid = false;
-      break;
-    }
-
-    if (grandValue.isGreaterThan(hotValue)) {
-      isLiquid = false;
-      break;
-    }
-  }
-
-  // Every enabled currency is listed, including empty ones. An audit that
-  // silently omits a currency holding nothing cannot be used to confirm the
-  // currency is actually being tracked.
-  const hotWalletEntries = Object.entries(hotTotals).map(([ticker, raw]) => ({
-    ticker,
-    raw: raw.toString(),
+  const list = entries.map((entry) => ({
+    name: `${entry.currency.emoji} ${entry.currency.name} ${getVerdictMarker(
+      entry,
+    )}`,
+    value:
+      `> Credited: ${formatAmount(
+        entry.credited,
+        entry.currency,
+        entry.concealed,
+      )}` +
+      "\n" +
+      `> Reserve: ${formatAmount(
+        entry.reserve,
+        entry.currency,
+        entry.concealed,
+      )}`,
+    inline: true,
   }));
 
-  if (hotWalletEntries.length > 0) {
-    const formattedWallets = formatWallet(
-      getSortedWallet(hotWalletEntries, currencies),
-      true,
-      concealedTickers,
-    );
-
-    const walletItems = Array.isArray(formattedWallets)
-      ? formattedWallets
-      : [formattedWallets];
-
-    if (walletItems.length > 0) {
-      let walletString = "";
-      for (const item of walletItems) {
-        walletString += `${item.name}\n${item.value}\n`;
-      }
-      formatted += "## Hot Wallets\n" + walletString;
-    }
+  for (const entry of untracked) {
+    list.push({
+      name: `${EMOJIS.RULES_ALARM} ${entry.ticker}`,
+      value:
+        `> Credited: **${entry.credited.toFixed(0)}** raw` +
+        "\n" +
+        "> Reserve: **none, no currency configured**",
+      inline: true,
+    });
   }
 
-  const concealedCount = concealedTickers ? concealedTickers.size : 0;
+  // Concealed currencies are left out of the total, because a total that
+  // included them could be differenced against the visible rows to recover the
+  // hidden amount.
+  const disclosed = entries.filter((entry) => !entry.concealed);
 
-  const liquidityStatus =
-    (isLiquid ? "## The Bot is Liquid ✅" : "## The Bot is Illiquid ❌") +
-    (concealedCount > 0
-      ? "\n-# Private currencies are withheld from this report and excluded " +
-        "from the liquidity check. Run this command with the reveal option as " +
-        "the bot owner for the full figures."
-      : "");
+  if (disclosed.length > 1) {
+    list.push({
+      name:
+        EMOJIS.CURRENCY_COIN +
+        (disclosed.length === entries.length
+          ? " __**Estimated Totals (USD)**__"
+          : " __**Estimated Totals (USD, public currencies only)**__"),
+      value:
+        `> Credited: **$${sumDollars(disclosed, (entry) => entry.credited)}**` +
+        "\n" +
+        `> Reserve: **$${sumDollars(disclosed, (entry) => entry.reserve)}**`,
+      inline: false,
+    });
+  }
 
-  return buildEmbed({
-    color: isLiquid ? COLORS.LIQUID_GREEN : COLORS.ERROR_RED,
+  return {
+    label: "ALL",
     title:
       `${EMOJIS.AUDIT_NOTES} ${COMMAND_DESCRIPTIONS.AUDIT}` +
       (reveal ? " (Full)" : ""),
-    description: formatted + liquidityStatus,
+    color: isLiquid ? COLORS.LIQUID_GREEN : COLORS.ERROR_RED,
+    content: formatSummaryNotes(ledger, hasFilters),
+    list,
+  };
+}
+
+/** Verdict for a single currency, as its panel's body text. */
+function formatCurrencyNotes(entry) {
+  if (entry.concealed) {
+    return (
+      `## ${entry.currency.name} is Private ${CONCEALED_MARKER}` +
+      "\n" +
+      "-# Figures and the creature breakdown are withheld, and this currency " +
+      "is excluded from the liquidity check. Run this command with the reveal " +
+      "option as the bot owner for the full position."
+    );
+  }
+
+  return entry.isLiquid
+    ? `## ${entry.currency.name} is Backed ✅`
+    : `## ${entry.currency.name} is Short ❌`;
+}
+
+/**
+ * One currency's full position: where the credited balance comes from, what
+ * backs it, and the creatures making up the sale value component.
+ */
+function buildCurrencyPanel(ledger, entry, reveal) {
+  const { concealed, currency } = entry;
+
+  const list = [
+    {
+      name: `${EMOJIS.BANK_SERVER} Wallet Balances`,
+      value: `> ${formatAmount(entry.walletCredited, currency, concealed)}`,
+      inline: true,
+    },
+    {
+      name: `${EMOJIS.CREATURES_FISH} Creature Sale Value`,
+      value: `> ${formatAmount(entry.saleCredited, currency, concealed)}`,
+      inline: true,
+    },
+    {
+      name: `${EMOJIS.MONEY_BAGS} Total Credited`,
+      value: `> ${formatAmount(entry.credited, currency, concealed)}`,
+      inline: true,
+    },
+    {
+      name: `${EMOJIS.CURRENCY_COIN} Hot Wallet Reserve`,
+      value: `> ${formatAmount(entry.reserve, currency, concealed)}`,
+      inline: true,
+    },
+    {
+      name: `${EMOJIS.TOTAL_CHART} ${
+        entry.headroom.isNegative() ? "Shortfall" : "Headroom"
+      }`,
+      value: `> ${formatAmount(entry.headroom.abs(), currency, concealed)}`,
+      inline: true,
+    },
+  ];
+
+  // The creature breakdown is a component of the concealed total, so publishing
+  // it would let the withheld figure be reconstructed from its parts.
+  if (!concealed) {
+    const owned = ledger.items.filter(
+      (item) => item.creatureTicker === currency.ticker,
+    );
+
+    if (owned.length > 0) {
+      const formatted = formatInventory(owned, false);
+      list.push(...(Array.isArray(formatted) ? formatted : [formatted]));
+    }
+  }
+
+  return {
+    label: entry.ticker,
+    title:
+      `${currency.emoji} ${currency.name} (${currency.ticker})` +
+      (reveal ? " (Full)" : ""),
+    // A concealed currency has no public verdict to colour by, so it falls back
+    // to the currency's own colour.
+    color: concealed
+      ? currency.color
+      : entry.isLiquid
+        ? COLORS.LIQUID_GREEN
+        : COLORS.ERROR_RED,
+    content: formatCurrencyNotes(entry),
+    list,
+  };
+}
+
+/**
+ * Panels for the /audit filter buttons: the summary followed by one panel per
+ * audited currency. Built from the currency list so a new coin needs no change
+ * here.
+ *
+ * <p>Filters are omitted below two currencies, since a single filter panel
+ * would only repeat the summary.
+ *
+ * @param {object} data - audit API response
+ * @param {boolean} [reveal] - show concealed currencies. Owner only; the caller
+ *   is responsible for the permission check.
+ */
+function buildAuditPanels(data, reveal = false) {
+  const ledger = getAuditLedger(data, reveal);
+  const hasFilters = ledger.entries.length > 1;
+  const summary = buildSummaryPanel(ledger, reveal, hasFilters);
+
+  if (!hasFilters) {
+    return [summary];
+  }
+
+  return [
+    summary,
+    ...ledger.entries.map((entry) => buildCurrencyPanel(ledger, entry, reveal)),
+  ];
+}
+
+/**
+ * The audit as one static embed, for contexts that cannot carry filter buttons.
+ * The summary only, since the per-currency detail is what the buttons are for.
+ *
+ * @param {object} data - audit API response
+ * @param {boolean} [reveal] - show concealed currencies. Owner only; the caller
+ *   is responsible for the permission check.
+ */
+function formatAudit(data, reveal = false) {
+  const summary = buildSummaryPanel(getAuditLedger(data, reveal), reveal, false);
+
+  return buildEmbed({
+    color: summary.color,
+    title: summary.title,
+    description: summary.content,
+    fields: summary.list,
   });
 }
 
 module.exports = {
+  buildAuditPanels,
+  computeAuditTotals,
   formatAudit,
+  getAuditLedger,
 };

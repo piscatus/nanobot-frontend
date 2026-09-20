@@ -1,5 +1,9 @@
 ﻿const { getCommandIds } = require("./commandUtil.js");
-const { COMMAND_KEYS, EMOJIS } = require("./constants.js");
+const {
+  COMMAND_KEYS,
+  EMOJIS,
+  TICKER_ANY_LABEL,
+} = require("./constants.js");
 const { getCurrencyDecimalValue } = require("./currencyUtil.js");
 const { isValidString } = require("./stringUtil.js");
 
@@ -63,6 +67,35 @@ function formatFishLogMessage(userId, creature, currency, commands) {
   );
 }
 
+/**
+ * Confirms the default currency a catch just set, for the receipt's optional
+ * section. A null ticker means the user cleared it and is back to fishing for
+ * anything.
+ */
+function formatFishDefaultMessage(ticker, currencies, commands) {
+  const commandMap = getCommandIds(commands);
+  const fishCommand = isValidString(commandMap[COMMAND_KEYS.FISH])
+    ? `</${COMMAND_KEYS.FISH}:${commandMap[COMMAND_KEYS.FISH]}>`
+    : `/${COMMAND_KEYS.FISH}`;
+
+  if (!isValidString(ticker)) {
+    return (
+      `You will now fish for **any** currency's creatures in this server.\n` +
+      `-# Pick a currency on ${fishCommand} to only catch that currency again.`
+    );
+  }
+
+  const currency = (currencies ?? []).find((coin) => coin.ticker === ticker);
+  const label = currency
+    ? `${currency.emoji} **${currency.name} [${currency.ticker}]**`
+    : `**${ticker}**`;
+
+  return (
+    `You will now fish for ${label} creatures in this server.\n` +
+    `-# Pick \`${TICKER_ANY_LABEL}\` on ${fishCommand} to fish for anything again.`
+  );
+}
+
 function formatFishCommandMessage(commands) {
   const commandMap = getCommandIds(commands);
   if (isValidString(commandMap[COMMAND_KEYS.FISH])) {
@@ -79,6 +112,7 @@ function formatFishReminderMessage(userId) {
 
 module.exports = {
   formatFishCommandMessage,
+  formatFishDefaultMessage,
   formatFishReminderMessage,
   formatFishLogMessage,
   formatFishCatchMessage,

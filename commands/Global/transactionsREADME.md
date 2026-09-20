@@ -28,7 +28,9 @@ saves paging to a kind you already know you want.
 ## Filtering
 
 The API returns the user's whole 30-day history in one call, so filtering and
-paging both happen client side and switching filters is instant.
+paging both happen client side and switching filters is instant. The API purges
+anything older nightly, and the embed says so directly under the balances note
+so nobody goes looking for a transaction that has already been dropped.
 
 The select menu is built from the user's own history by
 `buildTransactionFilterOptions`, and each entry carries a live count, for

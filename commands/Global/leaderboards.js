@@ -63,12 +63,14 @@ module.exports = {
     // answers from the creature list cached at startup instead of calling the
     // API on every keystroke.
     const creatures = client?.commandContext?.creatures ?? [];
+    const currencies = client?.commandContext?.currencies ?? [];
     const ticker = interaction.options.getString(COMMAND_OPTION_KEYS.CURRENCY);
     await interaction.respond(
       buildCreatureAutocompleteChoices(
         creatures,
         interaction.options.getFocused(),
         ticker,
+        currencies,
       ),
     );
   },

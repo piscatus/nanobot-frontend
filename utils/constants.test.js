@@ -9,6 +9,8 @@ const {
   NUMBERS,
   EMOJIS,
   ROLES,
+  TICKER_ANY,
+  TICKER_ANY_LABEL,
 } = require("./constants.js");
 
 describe("constants", () => {
@@ -82,6 +84,18 @@ describe("constants", () => {
     it("has expected command descriptions", () => {
       expect(COMMAND_DESCRIPTIONS.WALLET).toBe("Currency Balances");
       expect(COMMAND_DESCRIPTIONS.FISH).toBe("Fish for Creatures");
+    });
+  });
+
+  describe("TICKER_ANY", () => {
+    // Sent on the wire and compared against Constants.TICKER_ANY in the API, so
+    // renaming it here alone would quietly stop users clearing their default
+    it("matches the sentinel the API expects", () => {
+      expect(TICKER_ANY).toBe("ANY");
+    });
+
+    it("has a label that reads next to 'Name [TICKER]' choices", () => {
+      expect(TICKER_ANY_LABEL).toBe("Any");
     });
   });
 });

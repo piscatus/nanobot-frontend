@@ -359,6 +359,28 @@ describe("leaderboardUtil", () => {
     it("tolerates a missing list", () => {
       expect(buildCreatureAutocompleteChoices(null, "shrimp")).toEqual([]);
     });
+
+    it("hides creatures of disabled currencies when currencies are given", () => {
+      const withMonero = [...creatures, { name: "Clam", ticker: "XMR" }];
+      const currencies = [
+        { ticker: "XNO", enabled: true },
+        { ticker: "BAN", enabled: true },
+        { ticker: "XMR", enabled: false },
+      ];
+
+      expect(
+        buildCreatureAutocompleteChoices(withMonero, "", null, currencies).map(
+          (c) => c.value,
+        ),
+      ).toEqual(["KRAKEN", "SEAHORSE", "SHARK", "SHRIMP"]);
+      expect(
+        buildCreatureAutocompleteChoices(withMonero, "cl", null, currencies),
+      ).toEqual([]);
+      // Without a currency list the behaviour is unchanged.
+      expect(buildCreatureAutocompleteChoices(withMonero, "cl")).toEqual([
+        { name: "Clam [XMR]", value: "CLAM" },
+      ]);
+    });
   });
 
   describe("scoped navigation", () => {

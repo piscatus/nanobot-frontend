@@ -26,6 +26,7 @@ const {
   formatRainHelp,
   formatSalesHelp,
   formatSupportHelp,
+  formatTriviaDropsHelp,
   formatUpdatesHelp,
   formatWithdrawalsHelp,
 } = require("../../utils/helpUtil.js");
@@ -53,6 +54,7 @@ module.exports = {
       baseOption.addChoices({ name: "Rains", value: "4" });
       baseOption.addChoices({ name: "Sales", value: "3" });
       baseOption.addChoices({ name: "Support", value: "2" });
+      baseOption.addChoices({ name: "Trivia Drops", value: "11" });
       baseOption.addChoices({ name: "Updates", value: "1" });
       baseOption.addChoices({ name: "Withdrawals", value: "0" });
 
@@ -128,6 +130,11 @@ module.exports = {
           color: COLORS.NANOBOT_BLUE,
           title: EMOJIS.SUPPORT_ANIMAL + " Support",
           content: formatSupportHelp(),
+        },
+        11: {
+          color: COLORS.NANOBOT_BLUE,
+          title: EMOJIS.TRIVIA_BRAIN + " Trivia Drops",
+          content: formatTriviaDropsHelp(response.data.commands, currencies),
         },
         1: {
           color: COLORS.NANOBOT_BLUE,

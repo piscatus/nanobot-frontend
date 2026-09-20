@@ -5,6 +5,8 @@ const {
   COMMAND_DESCRIPTIONS,
   COMMAND_KEYS,
   EMOJIS,
+  TICKER_ANY,
+  TICKER_ANY_LABEL,
 } = require("./constants.js");
 BigNumber.config({ DECIMAL_PLACES: 30, EXPONENTIAL_AT: 31 });
 const dollarValueDecimals = 8;
@@ -107,19 +109,33 @@ const MAXIMUM_CHOICES = 25;
  * <p>Choices are fixed when the command is deployed, so this runs at startup
  * against the live currency and creature lists. A currency with no creatures is
  * left out: offering it would only ever produce an empty result.
+ *
+ * @param {boolean} [options.includeAny] prepend an "Any" choice meaning no
+ *   currency in particular. Only /fish wants it, because only /fish stores the
+ *   choice as a default that then has to be clearable.
  */
-function buildCurrencyChoices(currencies, creatures) {
+function buildCurrencyChoices(currencies, creatures, { includeAny } = {}) {
   const stockedTickers = new Set(
     (creatures ?? []).map((creature) => creature.ticker),
   );
 
-  return getSortedEnabledCurrencies(currencies)
+  const anyChoice = includeAny
+    ? [{ name: TICKER_ANY_LABEL, value: TICKER_ANY }]
+    : [];
+
+  const currencyChoices = getSortedEnabledCurrencies(currencies)
     .filter((currency) => stockedTickers.has(currency.ticker))
-    .slice(0, MAXIMUM_CHOICES)
     .map((currency) => ({
       name: `${currency.name} [${currency.ticker}]`,
       value: currency.ticker,
     }));
+
+  // Nothing to opt out of without a currency to opt into
+  if (!currencyChoices.length) {
+    return [];
+  }
+
+  return [...anyChoice, ...currencyChoices].slice(0, MAXIMUM_CHOICES);
 }
 
 /** Enabled currencies, sorted for stable display order. */
@@ -136,7 +152,9 @@ function getSortedEnabledCurrencies(currencies) {
 function formatCurrencies(currencies, commands) {
   const filteredCurrencies = getSortedEnabledCurrencies(currencies);
 
-  const currencyRows = filteredCurrencies.map(formatCurrencyRow);
+  const currencyRows = filteredCurrencies.map((currency) =>
+    formatCurrencyRow(currency),
+  );
 
   return formatCurrencyCommandLinks(commands) + `${currencyRows.join("\n")}`;
 }
@@ -144,8 +162,11 @@ function formatCurrencies(currencies, commands) {
 /**
  * One currency's detail block. Split out of formatCurrencies so a single
  * currency can be rendered on its own filter panel.
+ *
+ * The heading is skipped on a filtered panel, whose embed title already names
+ * the currency; the ALL view has a generic title and keeps it.
  */
-function formatCurrencyRow(currency) {
+function formatCurrencyRow(currency, { heading = true } = {}) {
   const emoji = currency.emoji;
   const ticker = currency.ticker;
   const name = currency.name;
@@ -182,9 +203,11 @@ function formatCurrencyRow(currency) {
           getDecimalPlaces(currency.minimumRain, currency.precision)
         } decimal places)`
       : "";
+  const headingLine = heading
+    ? `## ${emoji} **${name}** (**${ticker}**)` + "\n"
+    : "";
   return (
-    `## ${emoji} **${name}** (**${ticker}**)` +
-    "\n" +
+    headingLine +
     `### ${ticker}/USD : **$${value}**` +
     "\n" +
     `-# Supported Decimal Precision : **${precision}**` +
@@ -303,7 +326,8 @@ function buildCurrencyPanels(currencies, commands) {
     label: "ALL",
     title: `${EMOJIS.CURRENCY_COIN} ${COMMAND_DESCRIPTIONS.CURRENCIES}`,
     color: COLORS.NANOBOT_BLUE,
-    content: links + enabled.map(formatCurrencyRow).join("\n"),
+    content:
+      links + enabled.map((currency) => formatCurrencyRow(currency)).join("\n"),
   };
 
   if (enabled.length < 2) {
@@ -316,7 +340,7 @@ function buildCurrencyPanels(currencies, commands) {
       label: currency.ticker.toUpperCase(),
       title: `${currency.emoji} ${currency.name} (${currency.ticker})`,
       color: currency.color,
-      content: links + formatCurrencyRow(currency),
+      content: links + formatCurrencyRow(currency, { heading: false }),
     })),
   ];
 }

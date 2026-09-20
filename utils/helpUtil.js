@@ -195,6 +195,66 @@ function formatDropsHelp(commands, currencies) {
   );
 }
 
+function formatTriviaDropsHelp(commands, currencies) {
+  const commandMap = getCommandIds(commands);
+  const dropDetails = formatCurrencyMinimums(
+    currencies,
+    commandMap,
+    (c) => c.minimumDrop,
+    (c, formatted, decimals) =>
+      `### The minimum </${COMMAND_KEYS.WALLET}:${
+        commandMap[COMMAND_KEYS.WALLET]
+      }> trivia drop amount for **${c.name.toUpperCase()}**:\n` +
+      `**${formatted} ${c.ticker.toUpperCase()}** ${c.emoji}\n` +
+      `(${decimals} decimal places)\n`,
+  );
+
+  return (
+    `## Users can leave an input amount of </${COMMAND_KEYS.INVENTORY}:${
+      commandMap[COMMAND_KEYS.INVENTORY]
+    }> creatures and </${COMMAND_KEYS.WALLET}:${
+      commandMap[COMMAND_KEYS.WALLET]
+    }> currencies in a channel attached to a trivia question with </${
+      COMMAND_KEYS.TRIVIADROP
+    }:${commandMap[COMMAND_KEYS.TRIVIADROP]}>!\n\n` +
+    `### All trivia drops last **${NUMBERS.DEFAULT_MINUTES_TRIVIADROP} minutes**, however:\n` +
+    `If \`duration_minutes\` is specified, trivia drops can be anywhere from **${NUMBERS.MINIMUM_MINUTES_TRIVIADROP} minute** up to **${NUMBERS.MAXIMUM_MINUTES_TRIVIADROP} minutes**!\n` +
+    `If \`duration_seconds\` is specified without minutes, the drop lasts **${NUMBERS.MINIMUM_SECONDS_TRIVIADROP}–${NUMBERS.MAXIMUM_SECONDS_TRIVIADROP} seconds**. Seconds under **${NUMBERS.MINIMUM_SECONDS_TRIVIADROP}** are allowed when \`duration_minutes\` is also set.\n` +
+    `### Anyone can answer a trivia drop, however:\n` +
+    `There is no role requirement and no random-winner option. The 2–4 answers appear only on buttons, never in the embed. Each user may lock in **one** answer, and the reply does not say whether it was right.\n` +
+    `### The first users to press the correct answer share the drop evenly when it ends, however:\n` +
+    `If \`users\` is specified, that number is the **maximum number of winners**, not a cap on how many people may answer.\n` +
+    `The drop ends when the timer runs out, or as soon as that many correct answers have been locked in.\n` +
+    `If nobody answers correctly, the reward is returned to the dropper.\n` +
+    `An optional \`category\` picks the question bank; leave it empty for a question from any category. An optional \`difficulty\` of \`easy\`, \`medium\`, or \`hard\` can be set the same way; leave it empty for any.\n\n` +
+    dropDetails +
+    `### The minimum </${COMMAND_KEYS.INVENTORY}:${
+      commandMap[COMMAND_KEYS.INVENTORY]
+    }> trivia drop amount:\n` +
+    "**1 Creature**\n" +
+    "(0 decimal places)\n\n" +
+    `### Users can also utilize a configured list of "shortcut" currency values to include in their input, found in </${
+      COMMAND_KEYS.ALIASES
+    } ${COMMAND_OPTION_KEYS.GLOBAL}:${
+      commandMap[COMMAND_KEYS.ALIASES]
+    }> and </${COMMAND_KEYS.ALIASES} ${COMMAND_OPTION_KEYS.SERVER}:${
+      commandMap[COMMAND_KEYS.ALIASES]
+    }>.\n\n` +
+    "### Here are some example commands:\n" +
+    "- /triviadrop `input: 1 ban`\n" +
+    "  - This will leave a 3-minute trivia drop of 1 BAN. Anyone may answer; correct answers share it when it ends\n" +
+    "- /triviadrop `input: $1 Nano` `category: Science` `duration_minutes: 5`\n" +
+    "  - This will leave a 5-minute Science trivia drop of $1 worth of XNO\n" +
+    "- /triviadrop `input: 1 ban` `duration_seconds: 30`\n" +
+    "  - This will leave a 30-second trivia drop of 1 BAN\n" +
+    "- /triviadrop `input: 1 ban` `category: Science` `difficulty: hard`\n" +
+    "  - This will leave a 3-minute hard Science trivia drop of 1 BAN\n" +
+    "- /triviadrop `input: 10 sharks` `users: 3`\n" +
+    "  - This will leave a 3-minute trivia drop of 10 sharks for the first 3 correct answers to share. The drop can end early once those winner slots are filled\n\n" +
+    "-# Try including a message at the end of the trivia drop input such as `input: 1 banano for the smart ones`!"
+  );
+}
+
 function formatFishingHelp(commands) {
   const commandMap = getCommandIds(commands);
   return (
@@ -528,6 +588,7 @@ module.exports = {
   formatAwardsHelp,
   formatDepositsHelp,
   formatDropsHelp,
+  formatTriviaDropsHelp,
   formatFishingHelp,
   formatGiftHelp,
   formatGeneralHelp,

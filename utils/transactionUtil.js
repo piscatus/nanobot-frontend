@@ -607,7 +607,9 @@ function getTransactionEmbed({
         commandMap[COMMAND_KEYS.INVENTORY]
       }> and </${COMMAND_KEYS.WALLET}:${
         commandMap[COMMAND_KEYS.WALLET]
-      }> to view your *current* balances!\n` + fields,
+      }> to view your *current* balances!\n` +
+      `-# Transaction history is only retained for **30 days**.\n` +
+      fields,
     footer: formatTransactionFooter(
       filterOptions,
       filterValue,

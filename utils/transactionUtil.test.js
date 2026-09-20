@@ -119,6 +119,34 @@ describe("transactionUtil", () => {
       await paginatePromise;
     });
 
+    it("states the 30 day retention under the balances note", async () => {
+      const paginatePromise = paginateTransactions(
+        mockInteraction,
+        mockClient,
+        "Transaction History",
+        [],
+        mockCommands,
+        "user-123",
+        mockCurrencies,
+        mockCreatures,
+        mockBonuses
+      );
+
+      const editCall = mockInteraction.editReply.mock.calls[0][0];
+      const description = editCall.embeds[0].data.description;
+      const balancesNote = description.indexOf("to view your *current* balances!");
+      const retentionNote = description.indexOf(
+        "-# Transaction history is only retained for **30 days**."
+      );
+
+      expect(balancesNote).toBeGreaterThan(-1);
+      expect(retentionNote).toBeGreaterThan(balancesNote);
+
+      await Promise.resolve();
+      endHandler?.({ size: 0 });
+      await paginatePromise;
+    });
+
     it("displays transaction when data is provided", async () => {
       const transactions = [
         {

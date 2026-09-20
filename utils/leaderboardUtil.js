@@ -148,14 +148,30 @@ function resolveInitialState(
   };
 }
 
-/** Choices for the creature autocomplete, narrowed by what has been typed. */
-function buildCreatureAutocompleteChoices(creatures, query, ticker) {
+/**
+ * Choices for the creature autocomplete, narrowed by what has been typed.
+ * When `currencies` is given, creatures of a disabled currency are left out so
+ * a hidden currency does not surface through its creature names.
+ */
+function buildCreatureAutocompleteChoices(creatures, query, ticker, currencies) {
   const search = String(query ?? "")
     .trim()
     .toLowerCase();
+  const enabledTickers = currencies
+    ? new Set(
+        currencies
+          .filter((currency) => currency?.enabled)
+          .map((currency) => currency.ticker?.toUpperCase()),
+      )
+    : null;
 
   return (creatures ?? [])
     .filter((creature) => creature?.name)
+    .filter(
+      (creature) =>
+        !enabledTickers ||
+        enabledTickers.has(creature.ticker?.toUpperCase()),
+    )
     .filter(
       (creature) =>
         !ticker ||

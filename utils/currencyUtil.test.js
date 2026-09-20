@@ -1,5 +1,7 @@
 const {
   buildCurrencyChoices,
+  buildCurrencyPanels,
+  formatCurrencyRow,
   getCurrencyDollarValue,
   getCurrencyDecimalValue,
   getDecimalPlaces,
@@ -277,6 +279,100 @@ describe("currencyUtil", () => {
       expect(buildCurrencyChoices(null, null)).toEqual([]);
       expect(buildCurrencyChoices([nano, banano], null)).toEqual([]);
       expect(buildCurrencyChoices(null, creatures)).toEqual([]);
+    });
+
+    it("leaves out the 'Any' choice unless it is asked for", () => {
+      const choices = buildCurrencyChoices([nano, banano], creatures);
+      expect(choices.map((choice) => choice.value)).not.toContain("ANY");
+    });
+
+    it("puts 'Any' first when asked, so clearing is the obvious first entry", () => {
+      const choices = buildCurrencyChoices([nano, banano], creatures, {
+        includeAny: true,
+      });
+
+      expect(choices).toEqual([
+        { name: "Any", value: "ANY" },
+        { name: "Banano [BAN]", value: "BAN" },
+        { name: "Nano [XNO]", value: "XNO" },
+      ]);
+    });
+
+    it("counts 'Any' against the 25 choice cap", () => {
+      const many = Array.from({ length: 30 }, (unused, index) => ({
+        ticker: `T${String(index).padStart(2, "0")}`,
+        name: `Coin ${index}`,
+        enabled: true,
+      }));
+      const stocked = many.map((currency) => ({ ticker: currency.ticker }));
+
+      const choices = buildCurrencyChoices(many, stocked, {
+        includeAny: true,
+      });
+
+      expect(choices).toHaveLength(25);
+      expect(choices[0]).toEqual({ name: "Any", value: "ANY" });
+    });
+
+    it("offers nothing at all when no currency is stocked", () => {
+      // An "Any" choice on its own would let a user clear a default they could
+      // never have set
+      expect(buildCurrencyChoices([nano, banano], [], { includeAny: true })).toEqual(
+        [],
+      );
+    });
+  });
+
+  describe("buildCurrencyPanels", () => {
+    const buildCurrency = (ticker, name, emoji) => ({
+      ticker,
+      name,
+      emoji,
+      enabled: true,
+      color: "#000000",
+      value: "1.00",
+      precision: "30",
+      processDeposits: true,
+      processWithdrawals: true,
+      minimumDrop: "1",
+      minimumGift: "1",
+      minimumRain: "1",
+      minimumDeposit: "1",
+      minimumWithdraw: "1",
+      feeEstimate: "0",
+    });
+
+    const nano = buildCurrency("XNO", "Nano", "Ⓝ");
+    const banano = buildCurrency("BAN", "Banano", "🍌");
+    const commands = [
+      { name: "currencies", commandId: "cur1" },
+      { name: "receive", commandId: "rec1" },
+      { name: "send", commandId: "send1" },
+      { name: "wallet", commandId: "wal1" },
+    ];
+
+    it("keeps the currency heading on the ALL panel", () => {
+      const [allPanel] = buildCurrencyPanels([nano, banano], commands);
+
+      expect(allPanel.label).toBe("ALL");
+      expect(allPanel.content).toMatch(/^## 🍌 \*\*Banano\*\* \(\*\*BAN\*\*\)$/m);
+      expect(allPanel.content).toMatch(/^## Ⓝ \*\*Nano\*\* \(\*\*XNO\*\*\)$/m);
+    });
+
+    it("drops the heading on a filtered panel, whose title already names it", () => {
+      const panels = buildCurrencyPanels([nano, banano], commands);
+      const nanoPanel = panels.find((panel) => panel.label === "XNO");
+
+      expect(nanoPanel.title).toBe("Ⓝ Nano (XNO)");
+      expect(nanoPanel.content).not.toMatch(/^## /m);
+      expect(nanoPanel.content).toContain("### XNO/USD : **$1.00**");
+    });
+
+    it("renders the heading by default and omits it on request", () => {
+      expect(formatCurrencyRow(nano)).toMatch(/^## Ⓝ \*\*Nano\*\* \(\*\*XNO\*\*\)\n/);
+      expect(formatCurrencyRow(nano, { heading: false })).toMatch(
+        /^### XNO\/USD/,
+      );
     });
   });
 });

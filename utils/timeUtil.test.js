@@ -39,5 +39,12 @@ describe("timeUtil", () => {
     it("formats 2 days and 30 minutes", () => {
       expect(formatTime(2910)).toBe("2 days and 30 minutes");
     });
+
+    it("formats leftover seconds", () => {
+      expect(formatTime(0, 30)).toBe("30 seconds");
+      expect(formatTime(2, 5)).toBe("2 minutes and 5 seconds");
+      expect(formatTime(1, 1)).toBe("1 minute and 1 second");
+      expect(formatTime(60, 15)).toBe("1 hour and 15 seconds");
+    });
   });
 });

@@ -25,9 +25,11 @@ const { execute: getCurrencies } = require("./jobs/getCurrencies.js");
 const { execute: setActivity } = require("./jobs/setActivity.js");
 const { execute: setCommands } = require("./jobs/setCommands.js");
 const { execute: joinDrop } = require("./requests/pickup.js");
+const triviasApi = require("./requests/trivias.js");
 const verificationsApi = require("./requests/verifications.js");
 const { checkStatuses } = require("./utils/statusUtil.js");
 const { safeDeferUpdate } = require("./utils/interactionUtil.js");
+const { parseTriviaCustomId } = require("./utils/triviaUtil.js");
 
 // Backstop. Any unhandled rejection terminates Node, which takes the bot
 // offline for every guild until the container restarts. A single expired
@@ -46,21 +48,29 @@ process.on("uncaughtException", (err) => {
  * that cannot get its data simply deploys without the dependent option.
  */
 async function loadCommandContext() {
-  const [currenciesResponse, creaturesResponse] = await Promise.all([
-    getCurrencies(),
-    getCreatures(),
-  ]);
+  const [currenciesResponse, creaturesResponse, triviaCategoriesResponse] =
+    await Promise.all([getCurrencies(), getCreatures(), triviasApi.getCategories()]);
 
   const currencies = currenciesResponse?.data ?? null;
   const creatures = creaturesResponse?.data ?? null;
+  // Served to /triviadrop's category autocomplete. An empty list only costs
+  // the suggestions; the API still validates whatever is typed.
+  const triviaCategories = Array.isArray(triviaCategoriesResponse?.data)
+    ? triviaCategoriesResponse.data
+    : [];
 
   if (!currencies?.length || !creatures?.length) {
     console.warn(
       "Could not load currencies and creatures; deploying commands without currency choices.",
     );
   }
+  if (!triviaCategories.length) {
+    console.warn(
+      "Could not load trivia categories; /triviadrop will offer no category suggestions.",
+    );
+  }
 
-  return { currencies, creatures };
+  return { currencies, creatures, triviaCategories };
 }
 
 async function toCommandJson(command, context) {
@@ -170,6 +180,126 @@ function cleanUpExpiredCooldowns(collection) {
       collection.delete(userId); // Remove expired entry
     }
   }
+}
+
+/**
+ * Shared path for every button that enters a drop: the plain "Join Drop"
+ * button and each trivia answer button. Applies the button cooldown, sends
+ * unverified users through the captcha first, then records the pickup (with
+ * the pressed answer's index on a trivia drop) and shows the given reply.
+ *
+ * @param {object} options
+ * @param {number|null} options.answerIndex 0-based answer on a trivia drop, else null
+ * @param {string} options.commandKey command key used in error titles
+ * @param {string} options.successTitle title of the ephemeral confirmation
+ * @param {string} options.successDescription body of the ephemeral confirmation
+ */
+async function handlePickupButton(interaction, client, options) {
+  const { answerIndex, commandKey, successTitle, successDescription } =
+    options;
+  const userId = interaction.user.id;
+
+  const cooldownExpiry = client.buttonCooldowns.get(userId);
+  if (cooldownExpiry && Date.now() < cooldownExpiry) {
+    return await interaction.reply({
+      content: `<@${userId}>, please wait one second between collecting drops.`,
+      ephemeral: true,
+    });
+  }
+
+  setCooldown(client.buttonCooldowns, userId, buttonCommandCooldown);
+
+  await interaction.deferReply({ ephemeral: true });
+
+  const dropMessageId = interaction.message?.id ?? null;
+  const roleIds = interaction.member.roles.cache.map((r) => r.id) ?? null;
+
+  const successEmbed = buildEmbed({
+    color: COLORS.NANOBOT_BLUE,
+    title: successTitle,
+    description: successDescription,
+  });
+
+  const checkResponse = await verificationsApi.check(userId);
+
+  if (checkResponse?.status !== 200) {
+    const emojisList = Array.isArray(checkResponse?.data)
+      ? checkResponse.data
+      : null;
+
+    if (!emojisList || emojisList.length < 4) {
+      return await interaction.editReply({
+        embeds: [
+          buildEmbed({
+            title: formatErrorTitle(commandKey),
+            description:
+              "Verification puzzle could not be loaded. Please try again later.",
+            error: true,
+          }),
+        ],
+      });
+    }
+
+    return await sendVerificationCaptchaPuzzle(
+      interaction,
+      client,
+      userId,
+      emojisList,
+      {
+        commandKey,
+        onCaptchaSuccess: async (i) => {
+          const captchaUserId = i.user.id;
+          // A captcha can sit unanswered long enough for the token to
+          // expire. Throwing here used to terminate the process.
+          if (!(await safeDeferUpdate(i))) return;
+          await verificationsApi.completeAfterCaptcha(captchaUserId);
+          const captchaRoles =
+            i.member?.roles?.cache?.map((r) => r.id) ?? null;
+          const joinResponse = await joinDrop(
+            dropMessageId,
+            captchaUserId,
+            captchaRoles,
+            answerIndex,
+          );
+          if (
+            !(await checkStatuses(
+              i,
+              joinResponse,
+              STATUS_CODES.ACCEPTED,
+              commandKey,
+            ))
+          )
+            return;
+          await i.editReply({
+            embeds: [successEmbed],
+            components: [],
+          });
+        },
+      },
+    );
+  }
+
+  const response = await joinDrop(
+    dropMessageId,
+    interaction.user.id ?? null,
+    roleIds,
+    answerIndex,
+  );
+
+  if (
+    !(await checkStatuses(
+      interaction,
+      response,
+      STATUS_CODES.ACCEPTED,
+      commandKey,
+    ))
+  )
+    return;
+
+  return await interaction.editReply({
+    embeds: [successEmbed],
+    components: [],
+  });
 }
 
 async function initialize() {
@@ -287,114 +417,26 @@ async function initialize() {
       // Check for button interactions
       if (interaction.isButton()) {
         if (interaction.customId === "pickup") {
-          const cooldownExpiry = client.buttonCooldowns.get(userId);
-          if (cooldownExpiry && Date.now() < cooldownExpiry) {
-            return await interaction.reply({
-              content: `<@${userId}>, please wait one second between collecting drops.`,
-              ephemeral: true,
-            });
-          }
-
-          setCooldown(client.buttonCooldowns, userId, buttonCommandCooldown);
-
-          await interaction.deferReply({ ephemeral: true });
-
-          const dropMessageId = interaction.message?.id ?? null;
-          const roleIds =
-            interaction.member.roles.cache.map((r) => r.id) ?? null;
-
-          const checkResponse = await verificationsApi.check(userId);
-
-          if (checkResponse?.status !== 200) {
-            const emojisList = Array.isArray(checkResponse?.data)
-              ? checkResponse.data
-              : null;
-
-            if (!emojisList || emojisList.length < 4) {
-              return await interaction.editReply({
-                embeds: [
-                  buildEmbed({
-                    title: formatErrorTitle(COMMAND_KEYS.PICKUP),
-                    description:
-                      "Verification puzzle could not be loaded. Please try again later.",
-                    error: true,
-                  }),
-                ],
-              });
-            }
-
-            return await sendVerificationCaptchaPuzzle(
-              interaction,
-              client,
-              userId,
-              emojisList,
-              {
-                commandKey: COMMAND_KEYS.PICKUP,
-                onCaptchaSuccess: async (i) => {
-                  const captchaUserId = i.user.id;
-                  // A captcha can sit unanswered long enough for the token to
-                  // expire. Throwing here used to terminate the process.
-                  if (!(await safeDeferUpdate(i))) return;
-                  await verificationsApi.completeAfterCaptcha(captchaUserId);
-                  const captchaRoles =
-                    i.member?.roles?.cache?.map((r) => r.id) ?? null;
-                  const joinResponse = await joinDrop(
-                    dropMessageId,
-                    captchaUserId,
-                    captchaRoles,
-                  );
-                  if (
-                    !(await checkStatuses(
-                      i,
-                      joinResponse,
-                      STATUS_CODES.ACCEPTED,
-                      COMMAND_KEYS.PICKUP,
-                    ))
-                  )
-                    return;
-                  await i.editReply({
-                    embeds: [
-                      buildEmbed({
-                        color: COLORS.NANOBOT_BLUE,
-                        title:
-                          EMOJIS.JOIN_DROP +
-                          " " +
-                          COMMAND_DESCRIPTIONS.PICKUP,
-                        description: `This drop will be evenly distributed to the winner(s) when the drop ends!`,
-                      }),
-                    ],
-                    components: [],
-                  });
-                },
-              },
-            );
-          }
-
-          const response = await joinDrop(
-            dropMessageId,
-            interaction.user.id ?? null,
-            roleIds,
-          );
-
-          if (
-            !(await checkStatuses(
-              interaction,
-              response,
-              STATUS_CODES.ACCEPTED,
-              COMMAND_KEYS.PICKUP,
-            ))
-          )
-            return;
-
-          return await interaction.editReply({
-            embeds: [
-              buildEmbed({
-                color: COLORS.NANOBOT_BLUE,
-                title: EMOJIS.JOIN_DROP + " " + COMMAND_DESCRIPTIONS.PICKUP,
-                description: `This drop will be evenly distributed to the winner(s) when the drop ends!`,
-              }),
-            ],
-            components: [],
+          return await handlePickupButton(interaction, client, {
+            answerIndex: null,
+            commandKey: COMMAND_KEYS.PICKUP,
+            successTitle: EMOJIS.JOIN_DROP + " " + COMMAND_DESCRIPTIONS.PICKUP,
+            successDescription:
+              "This drop will be evenly distributed to the winner(s) when the drop ends!",
+          });
+        }
+        // A trivia answer is a pickup that also says which button was pressed.
+        // The reply confirms the answer was recorded and nothing more: whether
+        // it was right is revealed to everyone when the drop ends.
+        const answerIndex = parseTriviaCustomId(interaction.customId);
+        if (answerIndex !== null) {
+          return await handlePickupButton(interaction, client, {
+            answerIndex,
+            commandKey: COMMAND_KEYS.TRIVIA_ANSWER,
+            successTitle:
+              EMOJIS.TRIVIA_BRAIN + " " + COMMAND_DESCRIPTIONS.TRIVIA_ANSWER,
+            successDescription:
+              "Your answer has been recorded and cannot be changed. The correct answer and the winners are revealed when the trivia drop ends!",
           });
         }
         return;

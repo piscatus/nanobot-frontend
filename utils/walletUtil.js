@@ -118,6 +118,7 @@ function formatWallet(
 }
 
 module.exports = {
+  CONCEALED_PLACEHOLDER,
   getSortedWallet,
   getCurrencyInfo,
   formatWallet,

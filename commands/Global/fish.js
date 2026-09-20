@@ -16,6 +16,7 @@ const {
 } = require("../../utils/errorUtil.js");
 const { buildCurrencyChoices } = require("../../utils/currencyUtil.js");
 const {
+  formatFishDefaultMessage,
   formatFishLogMessage,
   formatFishCatchMessage,
 } = require("../../utils/fishUtil.js");
@@ -35,6 +36,8 @@ async function runFishSuccess(interaction, client, response) {
   const { guildId, userId } = getInteractionContext(interaction);
   const {
     currencies,
+    defaultTicker,
+    defaultTickerChanged,
     guildConfigurations,
     transactionId,
     completedSecondaryTransfers,
@@ -60,13 +63,26 @@ async function runFishSuccess(interaction, client, response) {
     COMMAND_KEYS.FISH,
   );
 
+  // Only when this catch changed the default, so routine trips stay uncluttered
+  const defaultInfo = defaultTickerChanged
+    ? {
+        emoji: EMOJIS.CREATURES_FISH,
+        title: "Default Currency",
+        description: formatFishDefaultMessage(
+          defaultTicker,
+          currencies,
+          response.data.commands,
+        ),
+      }
+    : null;
+
   const receiptEmbed = getConfirmationInfo({
     userId,
     input: null,
     command: COMMAND_KEYS.FISH,
     address: null,
     isComplete: true,
-    optional: null,
+    optional: defaultInfo,
     items: Object.values(completedSecondaryTransfers)[0].items,
     wallets: Object.values(completedSecondaryTransfers)[0].wallets,
     creatures: response.data.creatures,
@@ -220,10 +236,13 @@ module.exports = {
   /**
    * Discord fixes a command's choices when it is deployed, so the currency list
    * is resolved from the API once at startup. Without it the command deploys
-   * with no option at all and fishing still works, just untargeted.
+   * with no option at all: fishing still works and saved defaults are still
+   * honoured, but nobody can change theirs until the API answers again.
    */
   buildData({ currencies, creatures } = {}) {
-    return buildFishCommand(buildCurrencyChoices(currencies, creatures));
+    return buildFishCommand(
+      buildCurrencyChoices(currencies, creatures, { includeAny: true }),
+    );
   },
   async execute(interaction, client) {
     try {

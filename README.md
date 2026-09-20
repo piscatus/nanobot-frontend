@@ -31,7 +31,7 @@ Before running the Nanobot Frontend application, please ensure the follow prereq
 5. **Cute Pictures Imported**:
 
    - Import at least one of each cute image type to ./cute
-   - `cd /birdPics && sudo scp -r ./* anon@192.168.86.250:/opt/nanobot-frontend/cute/bird`
+   - `cd /birdPics && sudo scp -r ./* user@hostname:/opt/nanobot-frontend/cute/bird`
 
 6. **File and Former Permissions Updated**:
 
