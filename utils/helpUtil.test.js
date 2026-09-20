@@ -8,6 +8,7 @@ const {
   formatGiftHelp,
   formatRainHelp,
   formatDropsHelp,
+  formatTriviaDropsHelp,
   formatAwardsHelp,
   formatWithdrawalsHelp,
 } = require("./helpUtil.js");
@@ -317,6 +318,37 @@ describe("helpUtil", () => {
       const msg = formatDropsHelp(commands, {});
       expect(msg).toContain("</drop:d1>");
       expect(msg).toContain("30 minutes");
+    });
+  });
+
+  describe("formatTriviaDropsHelp", () => {
+    const commands = [
+      { name: COMMAND_KEYS.TRIVIADROP, commandId: "td1" },
+      { name: COMMAND_KEYS.INVENTORY, commandId: "i1" },
+      { name: COMMAND_KEYS.WALLET, commandId: "w1" },
+      { name: COMMAND_KEYS.ALIASES, commandId: "a1" },
+    ];
+
+    it("includes triviadrop, inventory, and wallet command references", () => {
+      const msg = formatTriviaDropsHelp(commands, {});
+      expect(msg).toContain("</triviadrop:td1>");
+      expect(msg).toContain("</inventory:i1>");
+      expect(msg).toContain("</wallet:w1>");
+      expect(msg).toContain("3 minutes");
+    });
+
+    it("explains buttons, one answer, winners, refund, and early end", () => {
+      const msg = formatTriviaDropsHelp(commands, {});
+      expect(msg).toContain("answers appear only on buttons");
+      expect(msg).toContain("**one** answer");
+      expect(msg).toContain("maximum number of winners");
+      expect(msg).toContain("returned to the dropper");
+      expect(msg).toContain("end early");
+      expect(msg).toContain("/triviadrop");
+      expect(msg).toContain("duration_minutes");
+      expect(msg).toContain("duration_seconds");
+      expect(msg).toContain("category");
+      expect(msg).toContain("difficulty");
     });
   });
 

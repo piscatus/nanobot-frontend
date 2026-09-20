@@ -68,6 +68,67 @@ describe("transferUtil", () => {
       expect(roleField.value).toContain("<@&role123>");
     });
 
+    it("labels the field Maximum Winners when drop has trivia", () => {
+      const drop = {
+        duration: 30,
+        maximumEntries: "5",
+        trivia: { question: "What is 2+2?" },
+      };
+      const result = buildCriteriaList(drop, false);
+      const maxField = result.find((r) => r.name?.includes("Maximum Winners"));
+      expect(maxField).toBeDefined();
+      expect(maxField.name).toContain(EMOJIS.AWARD_TROPHY);
+      expect(maxField.value).toContain("5");
+      expect(
+        result.find((r) => r.name?.includes("Maximum Entries")),
+      ).toBeUndefined();
+    });
+
+    it("prepends Category and capitalized Difficulty when trivia has both", () => {
+      const drop = {
+        duration: 30,
+        trivia: { category: "Geography", difficulty: "medium" },
+      };
+      const result = buildCriteriaList(drop, false);
+      const categoryIndex = result.findIndex((r) =>
+        r.name?.includes("Category"),
+      );
+      const difficultyIndex = result.findIndex((r) =>
+        r.name?.includes("Difficulty"),
+      );
+      expect(categoryIndex).toBeGreaterThanOrEqual(0);
+      expect(difficultyIndex).toBe(categoryIndex + 1);
+      expect(result[categoryIndex].name).toBe(
+        EMOJIS.TRIVIA_BRAIN + " Category",
+      );
+      expect(result[categoryIndex].value).toBe("> **Geography**");
+      expect(result[difficultyIndex].name).toBe(
+        EMOJIS.LEVEL_CHARTS + " Difficulty",
+      );
+      expect(result[difficultyIndex].value).toBe("> **Medium**");
+    });
+
+    it("omits Category and Difficulty when trivia filters are null but still labels Maximum Winners", () => {
+      const drop = {
+        duration: 30,
+        maximumEntries: "1",
+        trivia: { category: null, difficulty: null },
+      };
+      const result = buildCriteriaList(drop, false);
+      expect(result.find((r) => r.name?.includes("Category"))).toBeUndefined();
+      expect(result.find((r) => r.name?.includes("Difficulty"))).toBeUndefined();
+      const maxField = result.find((r) => r.name?.includes("Maximum Winners"));
+      expect(maxField).toBeDefined();
+      expect(maxField.value).toContain("1");
+    });
+
+    it("omits Category and Difficulty on a plain drop without trivia", () => {
+      const drop = { duration: 30, maximumEntries: "1" };
+      const result = buildCriteriaList(drop, false);
+      expect(result.find((r) => r.name?.includes("Category"))).toBeUndefined();
+      expect(result.find((r) => r.name?.includes("Difficulty"))).toBeUndefined();
+    });
+
     it("skips maximum entries when length >= 4", () => {
       const drop = { duration: 30, maximumEntries: "10000" };
       const result = buildCriteriaList(drop, false);

@@ -21,6 +21,17 @@ BODY:
     "userRoles": [ '123', '321', '231' ]
 }
 
+On a trivia drop the body also includes `answerIndex` (the 0-based button
+that was pressed). Omit it on a plain drop.
+
+BODY (trivia drop):
+{
+    "dropId": "123",
+    "userId": "231",
+    "userRoles": [ '123', '321', '231' ],
+    "answerIndex": 2
+}
+
 RESPONSE:
 Status=200
 Data=BaseResponseDto

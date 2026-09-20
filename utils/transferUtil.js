@@ -25,18 +25,41 @@ const BigNumber = require("bignumber.js");
 BigNumber.config({ DECIMAL_PLACES: 30 });
 const dollarValueDecimals = 8;
 
+function capitalize(value) {
+  const text = String(value);
+  return text.charAt(0).toUpperCase() + text.slice(1).toLowerCase();
+}
+
 function buildCriteriaList(drop, displayTimestamp) {
   const criteriaList = [];
 
   if (drop != null) {
     const hasEndTime = isValidString(drop.endTime);
 
+    // Trivia drops: before confirmation these are what the user asked for
+    // (absent when they left the option empty); on the receipt they are the
+    // chosen question's. Never anything that could hint at the answer.
+    if (drop.trivia && isValidString(drop.trivia.category)) {
+      criteriaList.push({
+        name: EMOJIS.TRIVIA_BRAIN + " Category",
+        value: `> **${drop.trivia.category}**`,
+        inline: true,
+      });
+    }
+    if (drop.trivia && isValidString(drop.trivia.difficulty)) {
+      criteriaList.push({
+        name: EMOJIS.LEVEL_CHARTS + " Difficulty",
+        value: `> **${capitalize(drop.trivia.difficulty)}**`,
+        inline: true,
+      });
+    }
+
     if (isValidString(drop.duration)) {
       criteriaList.push({
         name: hasEndTime
           ? EMOJIS.TIMESTAMP_HOURGLASS + " Drop Duration"
           : EMOJIS.TIMESTAMP_HOURGLASS + " Activity Duration",
-        value: `> **${formatTime(drop.duration)}**`,
+        value: `> **${formatTime(drop.duration, drop.seconds)}**`,
         inline: true,
       });
     }
@@ -50,8 +73,11 @@ function buildCriteriaList(drop, displayTimestamp) {
     }
 
     if (isValidString(drop.maximumEntries) && drop.maximumEntries.length < 4) {
+      // On a trivia drop the same field caps winners, not joiners.
       criteriaList.push({
-        name: hasEndTime
+        name: drop.trivia
+          ? EMOJIS.AWARD_TROPHY + " Maximum Winners"
+          : hasEndTime
           ? EMOJIS.LEVEL_CHARTS + " Maximum Entries"
           : EMOJIS.MAN_RUNNING + " Most Recently Active Users",
         value: `> **${drop.maximumEntries}**`,

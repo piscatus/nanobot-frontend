@@ -1,7 +1,11 @@
 module.exports = (client) => {
+  const refreshTriviaCategoriesCommand = require("../../jobs/refreshTriviaCategories.js");
   const sendFishingReminderCommand = require("../../jobs/sendFishingReminder.js");
   const sendMessagesCommand = require("../../jobs/sendMessages.js");
   const setStatusCommand = require("../../jobs/setStatus.js");
+  const {
+    TRIVIA_CATEGORY_REFRESH_MILLISECONDS,
+  } = require("../../utils/constants.js");
 
   async function updateStatus() {
     while (true) { // NOSONAR - intentional infinite loop for background task
@@ -44,4 +48,20 @@ module.exports = (client) => {
   }
 
   sendReminder();
+
+  async function refreshTriviaCategories() {
+    while (true) { // NOSONAR - intentional infinite loop for background task
+      // The boot-time load already ran, so wait first rather than reading twice.
+      await new Promise((resolve) =>
+        setTimeout(resolve, TRIVIA_CATEGORY_REFRESH_MILLISECONDS),
+      );
+      try {
+        await refreshTriviaCategoriesCommand.execute(client);
+      } catch (err) {
+        console.error("ready.js refreshTriviaCategories ERROR:", err);
+      }
+    }
+  }
+
+  refreshTriviaCategories();
 };

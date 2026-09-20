@@ -21,5 +21,5 @@
 
 | Option | Key | Required | Description |
 |--------|-----|----------|-------------|
-| Documentation | `documentation` | Yes | Topic: General, Awards, Deposits, Drops, Fishing, Gifts, Rains, Sales, Support, Updates, Withdrawals |
+| Documentation | `documentation` | Yes | Topic: General, then alphabetical — Awards, Deposits, Drops, Fishing, Gifts, Rains, Sales, Support, Trivia Drops, Updates, Withdrawals |
 | Message | `message` | No | Post as public message (Admin only) |
