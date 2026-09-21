@@ -154,7 +154,10 @@ function getConfirmationInfo(opts) {
   let output = "";
 
   if (isComplete) {
-    output += `<@${userId}>'s ${command} request *successfully* completed!\n`;
+    output +=
+      command === COMMAND_KEYS.SEND || command === COMMAND_KEYS.WITHDRAW
+        ? `<@${userId}>'s debit *successfully* completed and the withdrawal is queued.\n`
+        : `<@${userId}>'s ${command} request *successfully* completed!\n`;
   } else {
     output += `Please confirm your ${command} request —\n`;
   }

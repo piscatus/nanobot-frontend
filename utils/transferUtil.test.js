@@ -293,7 +293,7 @@ describe("transferUtil", () => {
         networkFee: "71860000",
       });
       expect(embed.data.description).toContain(
-        "*successfully* completed",
+        "debit *successfully* completed and the withdrawal is queued",
       );
       expect(embed.data.description).toContain("Network Fee: 0.00007186 XMR");
       expect(embed.data.description).not.toContain("~");

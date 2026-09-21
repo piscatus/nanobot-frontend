@@ -15,7 +15,9 @@ the hot wallet drops by precisely what was taken from the balance.
 
 The confirmation embed and the receipt after confirm both show the fee the
 hot wallet quoted for this withdrawal when the API could dry-run it
-(`networkFee`). `/currencies` and `/help` still show the currency's
+(`networkFee`). The receipt says the debit completed and the withdrawal is
+queued, because broadcast happens after the ledger debit on every chain,
+including Nano and Banano. `/currencies` and `/help` still show the currency's
 `feeEstimate`, which assumes a typical transaction size, because those
 commands have no specific withdrawal to quote. The minimum a user must
 clear is `minimumWithdraw + feeEstimate`, which
