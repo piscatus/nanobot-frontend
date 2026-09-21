@@ -89,6 +89,7 @@ module.exports = {
             url: getExplorerAccountUrl(curr, address),
             includeNotes: false,
             transactionId: null,
+            networkFee: res.data.networkFee,
           });
         },
       });

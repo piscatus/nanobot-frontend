@@ -277,20 +277,26 @@ function formatConfirmationRequirement(currency) {
   }`;
 }
 
+function settlementLine(currency) {
+  const confirmations = formatConfirmationRequirement(currency);
+  return confirmations ? `\n**Settles after ${confirmations}.**` : "";
+}
+
 /**
  * Network characteristics a user should see before committing to a transfer:
  * what the fee costs them, and how long settlement takes. Deliberately not
  * small text - on a chain with fees the recipient gets less than the amount
  * requested. Driven entirely by the currency document.
+ *
+ * <p>The estimate assumes a typical transaction size. The actual fee depends
+ * on how many outputs the hot wallet has to combine, so this is the fallback
+ * shown by /currencies and /help, and on /send when the wallet could not quote
+ * the exact fee.
  */
 function formatNetworkNotice(currency) {
   const fee = currency.feeEstimate;
   const hasFee = fee && new BigNumber(fee).isGreaterThan(0);
-
-  const confirmations = formatConfirmationRequirement(currency);
-  const settlement = confirmations
-    ? `\n**Settles after ${confirmations}.**`
-    : "";
+  const settlement = settlementLine(currency);
 
   if (!hasFee) {
     return (
@@ -308,8 +314,37 @@ function formatNetworkNotice(currency) {
   return (
     `### ⚠️ **Network Fee: ~${formattedFee} ${currency.ticker.toUpperCase()} ≈ $${feeDollarValue}**` +
     "\n" +
-    `**The fee is deducted from the amount you send, so the recipient receives slightly less than the requested amount.**` +
+    `**The fee is deducted from the amount you send, so the recipient receives slightly less than the requested amount. The exact fee depends on how many deposits the wallet combines.**` +
     settlement
+  );
+}
+
+/**
+ * The fee the hot wallet quoted for this specific withdrawal, plus what the
+ * recipient will actually receive. Used on the /send confirmation when the
+ * API was able to dry-run the transaction.
+ */
+function formatQuotedNetworkNotice(currency, feeRaw, amountRaw) {
+  const formattedFee = getCurrencyDecimalValue(feeRaw, currency.precision);
+  const feeDollarValue = getCurrencyDollarValue(
+    formattedFee,
+    currency.value,
+    dollarValueDecimals,
+  );
+  const received = new BigNumber(amountRaw ?? "0").minus(
+    new BigNumber(feeRaw ?? "0"),
+  );
+  const receivedRaw = received.isGreaterThan(0) ? received.toFixed(0) : "0";
+  const formattedReceived = getCurrencyDecimalValue(
+    receivedRaw,
+    currency.precision,
+  );
+  const ticker = currency.ticker.toUpperCase();
+  return (
+    `### ⚠️ **Network Fee: ${formattedFee} ${ticker} ≈ $${feeDollarValue}**` +
+    "\n" +
+    `**The fee is deducted from the amount you send. The recipient receives ${formattedReceived} ${ticker}.**` +
+    settlementLine(currency)
   );
 }
 
@@ -420,6 +455,7 @@ module.exports = {
   formatCurrencyCommandLinks,
   formatCurrencyRow,
   formatNetworkNotice,
+  formatQuotedNetworkNotice,
   formatCurrencyMessage,
   formatCurrencyTransferMessage,
   formatCurrencyReceiveMessage,

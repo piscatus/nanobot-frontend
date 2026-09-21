@@ -13,6 +13,7 @@ const {
   formatCurrencySendMessage,
   formatCurrencyTransferMessage,
   formatNetworkNotice,
+  formatQuotedNetworkNotice,
 } = require("./currencyUtil.js");
 
 describe("currencyUtil", () => {
@@ -126,6 +127,34 @@ describe("currencyUtil", () => {
       });
       expect(notice).toContain("Network Fee");
       expect(notice).toContain("Settles after 10 network confirmations.");
+      expect(notice).toContain("depends on how many deposits");
+    });
+  });
+
+  describe("formatQuotedNetworkNotice", () => {
+    const monero = {
+      name: "Monero",
+      ticker: "xmr",
+      precision: 12,
+      value: "150",
+      confirmations: "10",
+    };
+
+    it("shows the exact fee and what the recipient receives", () => {
+      const notice = formatQuotedNetworkNotice(
+        monero,
+        "71860000",
+        "10021772069",
+      );
+      expect(notice).toContain("Network Fee: 0.00007186 XMR");
+      expect(notice).not.toContain("~");
+      expect(notice).toContain("The recipient receives 0.009949912069 XMR.");
+      expect(notice).toContain("Settles after 10 network confirmations.");
+    });
+
+    it("does not go negative when the fee exceeds the amount", () => {
+      const notice = formatQuotedNetworkNotice(monero, "60000000", "1000");
+      expect(notice).toContain("The recipient receives 0 XMR.");
     });
   });
 

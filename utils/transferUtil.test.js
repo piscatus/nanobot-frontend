@@ -220,5 +220,44 @@ describe("transferUtil", () => {
         "Settles after 10 network confirmations.",
       );
     });
+
+    it("shows the quoted fee and recipient amount when the API quoted one", () => {
+      const embed = getConfirmationInfo({
+        userId: "user1",
+        input: "0.01 xmr",
+        command: COMMAND_KEYS.SEND,
+        address: "4abc",
+        isComplete: false,
+        optional: null,
+        items: [],
+        wallets: [{ ticker: "xmr", raw: "10021772069" }],
+        creatures: null,
+        commands: [],
+        bonuses: null,
+        currencies: [
+          {
+            ticker: "xmr",
+            name: "Monero",
+            color: "#FF6600",
+            precision: 12,
+            value: "150",
+            feeEstimate: "60000000",
+            confirmations: "10",
+          },
+        ],
+        drop: null,
+        displayTimestamp: false,
+        title: "Send",
+        url: null,
+        includeNotes: false,
+        transactionId: null,
+        networkFee: "71860000",
+      });
+      expect(embed.data.description).toContain("Network Fee: 0.00007186 XMR");
+      expect(embed.data.description).not.toContain("~");
+      expect(embed.data.description).toContain(
+        "The recipient receives 0.009949912069 XMR.",
+      );
+    });
   });
 });

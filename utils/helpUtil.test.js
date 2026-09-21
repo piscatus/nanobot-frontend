@@ -430,6 +430,7 @@ describe("helpUtil", () => {
       expect(msg).toContain(
         "The fee is deducted from the amount you send, so the recipient receives slightly less than the requested amount.",
       );
+      expect(msg).toContain("depends on how many deposits");
       expect(msg).toContain("Settles after 10 network confirmations");
     });
   });

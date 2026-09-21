@@ -14,6 +14,7 @@ const {
   getCurrencyDecimalValue,
   formatConfirmationRequirement,
   formatNetworkNotice,
+  formatQuotedNetworkNotice,
 } = require("./currencyUtil.js");
 const { getCommandIds } = require("./commandUtil.js");
 const { COLORS, EMOJIS } = require("./constants.js");
@@ -126,6 +127,7 @@ function buildCriteriaList(drop, displayTimestamp) {
  * @param {string|null} opts.url - Embed URL
  * @param {boolean} opts.includeNotes - Include usage notes
  * @param {string|null} opts.transactionId - Transaction ID for footer
+ * @param {string|null} [opts.networkFee] - Exact fee quoted for this withdrawal
  */
 function getConfirmationInfo(opts) {
   const {
@@ -147,6 +149,7 @@ function getConfirmationInfo(opts) {
     url,
     includeNotes,
     transactionId,
+    networkFee,
   } = opts;
   let output = "";
 
@@ -304,7 +307,18 @@ function getConfirmationInfo(opts) {
     const withdrawalCurrency =
       wallets.length === 1 ? currencyMap.get(wallets[0].ticker) : null;
     if (withdrawalCurrency) {
-      output += formatNetworkNotice(withdrawalCurrency) + "\n";
+      const quoted =
+        networkFee &&
+        wallets.length === 1 &&
+        new BigNumber(networkFee).isGreaterThan(0);
+      output +=
+        (quoted
+          ? formatQuotedNetworkNotice(
+              withdrawalCurrency,
+              networkFee,
+              wallets[0].raw,
+            )
+          : formatNetworkNotice(withdrawalCurrency)) + "\n";
     }
   }
 

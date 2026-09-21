@@ -13,11 +13,17 @@ The fee is deducted from the amount sent rather than added on top, so a user
 asking to withdraw ten receives ten minus the fee. That keeps the ledger exact:
 the hot wallet drops by precisely what was taken from the balance.
 
-The minimum a user must clear is therefore `minimumWithdraw + feeEstimate`, which
-`getEffectiveMinimumWithdraw` computes and the confirmation embed shows.
-Settlement is not instant either: `formatConfirmationRequirement` renders the
+The confirmation embed shows the fee the hot wallet quoted for this withdrawal
+when the API could dry-run it (`networkFee`). Otherwise it shows the currency's
+`feeEstimate`, which assumes a typical transaction size. The minimum a user
+must clear is `minimumWithdraw + feeEstimate`, which
+`getEffectiveMinimumWithdraw` computes.
+
+Settlement is not instant: `formatConfirmationRequirement` renders the
 currency's confirmation depth, which ranges from one block on Nano to ten on
-Monero.
+Monero. On Monero a withdrawal may also wait behind locked change (~20 minutes
+per unavailable output). The user is told once that it is queued; it stays
+queued and is sent oldest-first when funds unlock.
 
 ## Interaction Types
 
