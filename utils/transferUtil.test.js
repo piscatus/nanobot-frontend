@@ -259,5 +259,47 @@ describe("transferUtil", () => {
         "The recipient receives 0.009949912069 XMR.",
       );
     });
+
+    it("shows the quoted fee on a completed withdrawal receipt", () => {
+      const embed = getConfirmationInfo({
+        userId: "user1",
+        input: "0.01 xmr",
+        command: COMMAND_KEYS.WITHDRAW,
+        address: "4abc",
+        isComplete: true,
+        optional: null,
+        items: [],
+        wallets: [{ ticker: "xmr", raw: "10021772069" }],
+        creatures: null,
+        commands: [],
+        bonuses: null,
+        currencies: [
+          {
+            ticker: "xmr",
+            name: "Monero",
+            color: "#FF6600",
+            precision: 12,
+            value: "150",
+            feeEstimate: "60000000",
+            confirmations: "10",
+          },
+        ],
+        drop: null,
+        displayTimestamp: false,
+        title: "Send",
+        url: null,
+        includeNotes: false,
+        transactionId: "tx-1",
+        networkFee: "71860000",
+      });
+      expect(embed.data.description).toContain(
+        "*successfully* completed",
+      );
+      expect(embed.data.description).toContain("Network Fee: 0.00007186 XMR");
+      expect(embed.data.description).not.toContain("~");
+      expect(embed.data.description).toContain(
+        "The recipient receives 0.009949912069 XMR.",
+      );
+    });
   });
 });

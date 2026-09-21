@@ -62,6 +62,11 @@ module.exports = {
       );
       if (input === null) return;
 
+      // Quoted on the preview pass. The confirmed API response does not
+      // re-quote, so the receipt has to reuse this or it falls back to the
+      // typical-size estimate and disagrees with the button the user pressed.
+      let quotedNetworkFee = null;
+
       const response = await executeTransferWithConfirmation(interaction, {
         apiCall: (confirmed) =>
           sendAPI(guildId, userId, confirmed, input, address),
@@ -70,6 +75,7 @@ module.exports = {
         getConfirmationParams: (res) => {
           const ticker = res.data.primaryTransfer.wallets[0].ticker;
           const curr = res.data.currencies.find((c) => c.ticker === ticker);
+          quotedNetworkFee = res.data.networkFee ?? null;
           return getConfirmationInfo({
             userId,
             input,
@@ -89,7 +95,7 @@ module.exports = {
             url: getExplorerAccountUrl(curr, address),
             includeNotes: false,
             transactionId: null,
-            networkFee: res.data.networkFee,
+            networkFee: quotedNetworkFee,
           });
         },
       });
@@ -122,6 +128,7 @@ module.exports = {
         title: EMBED_TITLE,
         url: explorerUrl,
         transactionId,
+        networkFee: quotedNetworkFee,
       });
 
       await postTransferReceiptAndLog(interaction, client, {

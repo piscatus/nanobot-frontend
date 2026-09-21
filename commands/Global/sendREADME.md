@@ -13,10 +13,12 @@ The fee is deducted from the amount sent rather than added on top, so a user
 asking to withdraw ten receives ten minus the fee. That keeps the ledger exact:
 the hot wallet drops by precisely what was taken from the balance.
 
-The confirmation embed shows the fee the hot wallet quoted for this withdrawal
-when the API could dry-run it (`networkFee`). Otherwise it shows the currency's
-`feeEstimate`, which assumes a typical transaction size. The minimum a user
-must clear is `minimumWithdraw + feeEstimate`, which
+The confirmation embed and the receipt after confirm both show the fee the
+hot wallet quoted for this withdrawal when the API could dry-run it
+(`networkFee`). `/currencies` and `/help` still show the currency's
+`feeEstimate`, which assumes a typical transaction size, because those
+commands have no specific withdrawal to quote. The minimum a user must
+clear is `minimumWithdraw + feeEstimate`, which
 `getEffectiveMinimumWithdraw` computes.
 
 Settlement is not instant: `formatConfirmationRequirement` renders the

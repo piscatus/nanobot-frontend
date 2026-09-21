@@ -282,6 +282,16 @@ function settlementLine(currency) {
   return confirmations ? `\n**Settles after ${confirmations}.**` : "";
 }
 
+function formatFeeDisplay(currency, feeRaw) {
+  const formattedFee = getCurrencyDecimalValue(feeRaw, currency.precision);
+  const feeDollarValue = getCurrencyDollarValue(
+    formattedFee,
+    currency.value,
+    dollarValueDecimals,
+  );
+  return { formattedFee, feeDollarValue };
+}
+
 /**
  * Network characteristics a user should see before committing to a transfer:
  * what the fee costs them, and how long settlement takes. Deliberately not
@@ -305,12 +315,7 @@ function formatNetworkNotice(currency) {
     );
   }
 
-  const formattedFee = getCurrencyDecimalValue(fee, currency.precision);
-  const feeDollarValue = getCurrencyDollarValue(
-    formattedFee,
-    currency.value,
-    dollarValueDecimals,
-  );
+  const { formattedFee, feeDollarValue } = formatFeeDisplay(currency, fee);
   return (
     `### ⚠️ **Network Fee: ~${formattedFee} ${currency.ticker.toUpperCase()} ≈ $${feeDollarValue}**` +
     "\n" +
@@ -325,12 +330,7 @@ function formatNetworkNotice(currency) {
  * API was able to dry-run the transaction.
  */
 function formatQuotedNetworkNotice(currency, feeRaw, amountRaw) {
-  const formattedFee = getCurrencyDecimalValue(feeRaw, currency.precision);
-  const feeDollarValue = getCurrencyDollarValue(
-    formattedFee,
-    currency.value,
-    dollarValueDecimals,
-  );
+  const { formattedFee, feeDollarValue } = formatFeeDisplay(currency, feeRaw);
   const received = new BigNumber(amountRaw ?? "0").minus(
     new BigNumber(feeRaw ?? "0"),
   );
