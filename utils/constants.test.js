@@ -18,6 +18,9 @@ describe("constants", () => {
     it("has Cancel and Confirm", () => {
       expect(BUTTON_DESCRIPTIONS.CANCEL).toBe("Cancel");
       expect(BUTTON_DESCRIPTIONS.CONFIRM).toBe("Confirm");
+      expect(BUTTON_DESCRIPTIONS.SEND_WHEN_READY).toBe(
+        "Send as soon as possible",
+      );
     });
   });
 

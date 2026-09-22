@@ -26,8 +26,10 @@ clear is `minimumWithdraw + feeEstimate`, which
 Settlement is not instant: `formatConfirmationRequirement` renders the
 currency's confirmation depth, which ranges from one block on Nano to ten on
 Monero. On Monero a withdrawal may also wait behind locked change (~20 minutes
-per unavailable output). The user is told once that it is queued; it stays
-queued and is sent oldest-first when funds unlock.
+per unavailable output). The confirmation then asks whether to send as soon
+as the funds unlock or to cancel and try `/send` again later, so a swap with
+a time limit is not queued by surprise. Confirming queues it; the user is
+told once that it is waiting, and it is sent oldest-first when funds unlock.
 
 ## Interaction Types
 

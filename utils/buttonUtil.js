@@ -304,10 +304,13 @@ exports.carousel = async function (interaction, client, panels) {
   });
 };
 
-exports.confirm = async function (interaction, command, embed) {
+exports.confirm = async function (interaction, command, embed, labels = {}) {
   try {
     let uniqueConfirmId = uuidv4();
     let uniqueCancelId = uuidv4();
+    const confirmLabel =
+      labels.confirmLabel || BUTTON_DESCRIPTIONS.CONFIRM;
+    const cancelLabel = labels.cancelLabel || BUTTON_DESCRIPTIONS.CANCEL;
 
     const interactionReply = await interaction.editReply({
       embeds: [embed],
@@ -315,11 +318,11 @@ exports.confirm = async function (interaction, command, embed) {
         new ActionRowBuilder().addComponents(
           new ButtonBuilder()
             .setCustomId(uniqueConfirmId)
-            .setLabel(BUTTON_DESCRIPTIONS.CONFIRM)
+            .setLabel(confirmLabel)
             .setStyle(ButtonStyle.Success),
           new ButtonBuilder()
             .setCustomId(uniqueCancelId)
-            .setLabel(BUTTON_DESCRIPTIONS.CANCEL)
+            .setLabel(cancelLabel)
             .setStyle(ButtonStyle.Danger),
         ),
       ],

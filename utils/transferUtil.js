@@ -128,6 +128,8 @@ function buildCriteriaList(drop, displayTimestamp) {
  * @param {boolean} opts.includeNotes - Include usage notes
  * @param {string|null} opts.transactionId - Transaction ID for footer
  * @param {string|null} [opts.networkFee] - Exact fee quoted for this withdrawal
+ * @param {boolean} [opts.delayed] - Wallet is locked; user must opt in to waiting
+ * @param {string|null} [opts.delayNotice] - Why the send would wait
  */
 function getConfirmationInfo(opts) {
   const {
@@ -150,6 +152,8 @@ function getConfirmationInfo(opts) {
     includeNotes,
     transactionId,
     networkFee,
+    delayed,
+    delayNotice,
   } = opts;
   let output = "";
 
@@ -160,6 +164,14 @@ function getConfirmationInfo(opts) {
         : `<@${userId}>'s ${command} request *successfully* completed!\n`;
   } else {
     output += `Please confirm your ${command} request —\n`;
+    if (delayed) {
+      output +=
+        `\n${
+          delayNotice ||
+          "The bot's wallet is briefly locked while a recent transaction settles (about 20 minutes)."
+        }\n` +
+        `-# Confirm to send as soon as the funds unlock. Cancel and run /send again later if you need the payment to go out immediately — swap services often have a time limit.\n`;
+    }
   }
 
   if (includeNotes) {
@@ -509,6 +521,7 @@ function getTransferInfo(
  * @param {string} options.statusCommandKey - Command key for status checks
  * @param {string} options.confirmCommandKey - Command key for confirm dialog (may differ, e.g. SALE for sell)
  * @param {function} options.getConfirmationParams - (response) => embed for confirm dialog
+ * @param {function} [options.getConfirmLabels] - (response) => { confirmLabel, cancelLabel }
  */
 async function executeTransferWithConfirmation(interaction, options) {
   const {
@@ -516,6 +529,7 @@ async function executeTransferWithConfirmation(interaction, options) {
     statusCommandKey,
     confirmCommandKey,
     getConfirmationParams,
+    getConfirmLabels,
   } = options;
 
   let response = await apiCall(false);
@@ -535,6 +549,7 @@ async function executeTransferWithConfirmation(interaction, options) {
       interaction,
       confirmCommandKey,
       getConfirmationParams(response),
+      getConfirmLabels ? getConfirmLabels(response) : {},
     );
     if (!confirmed) return null;
     response = await apiCall(true);

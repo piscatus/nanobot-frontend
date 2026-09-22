@@ -1,6 +1,7 @@
 const BUTTON_DESCRIPTIONS = Object.freeze({
   CANCEL: "Cancel",
   CONFIRM: "Confirm",
+  SEND_WHEN_READY: "Send as soon as possible",
 });
 
 const CHANNELS = Object.freeze({

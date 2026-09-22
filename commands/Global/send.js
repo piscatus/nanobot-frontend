@@ -2,6 +2,7 @@ const { SlashCommandBuilder } = require("@discordjs/builders");
 const { execute: sendAPI } = require("../../requests/send.js");
 const { formatRequestTitleMessage } = require("../../utils/commandUtil.js");
 const {
+  BUTTON_DESCRIPTIONS,
   COMMAND_KEYS,
   COMMAND_DESCRIPTIONS,
   COMMAND_OPTION_DESCRIPTIONS,
@@ -96,8 +97,14 @@ module.exports = {
             includeNotes: false,
             transactionId: null,
             networkFee: quotedNetworkFee,
+            delayed: Boolean(res.data.delayed),
+            delayNotice: res.data.delayNotice ?? null,
           });
         },
+        getConfirmLabels: (res) =>
+          res.data.delayed
+            ? { confirmLabel: BUTTON_DESCRIPTIONS.SEND_WHEN_READY }
+            : {},
       });
 
       if (!response) return;

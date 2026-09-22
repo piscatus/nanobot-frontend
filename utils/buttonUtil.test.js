@@ -81,6 +81,26 @@ describe("buttonUtil", () => {
       );
     });
 
+    it("uses a custom confirm label when provided", async () => {
+      const embed = buildEmbed({ title: "Confirm?", description: "Wait?" });
+      const confirmPromise = confirm(mockInteraction, "withdraw", embed, {
+        confirmLabel: BUTTON_DESCRIPTIONS.SEND_WHEN_READY,
+      });
+
+      await Promise.resolve();
+
+      const firstReply = mockInteraction.editReply.mock.calls[0][0];
+      const labels = JSON.stringify(firstReply.components);
+      expect(labels).toContain("Send as soon as possible");
+      expect(labels).toContain("Cancel");
+
+      collectHandler({
+        customId: "fixed-uuid-12345",
+        user: { id: "user-123" },
+      });
+      await confirmPromise;
+    });
+
     it("returns false when collector ends without collection", async () => {
       const embed = buildEmbed({ title: "Confirm?", description: "Yes or no" });
       const confirmPromise = confirm(mockInteraction, "fish", embed);

@@ -260,6 +260,47 @@ describe("transferUtil", () => {
       );
     });
 
+    it("asks whether to wait when the withdrawal is delayed", () => {
+      const embed = getConfirmationInfo({
+        userId: "user1",
+        input: "0.0002 xmr",
+        command: COMMAND_KEYS.SEND,
+        address: "4abc",
+        isComplete: false,
+        optional: null,
+        items: [],
+        wallets: [{ ticker: "xmr", raw: "200000000" }],
+        creatures: null,
+        commands: [],
+        bonuses: null,
+        currencies: [
+          {
+            ticker: "xmr",
+            name: "Monero",
+            color: "#FF6600",
+            precision: 12,
+            value: "150",
+            feeEstimate: "60000000",
+            confirmations: "10",
+          },
+        ],
+        drop: null,
+        displayTimestamp: false,
+        title: "Send",
+        url: null,
+        includeNotes: false,
+        transactionId: null,
+        delayed: true,
+        delayNotice:
+          "The bot's Monero wallet is briefly locked while a recent transaction settles (about 20 minutes).",
+      });
+      expect(embed.data.description).toContain(
+        "The bot's Monero wallet is briefly locked",
+      );
+      expect(embed.data.description).toContain("swap services");
+      expect(embed.data.description).toContain("Confirm to send as soon as");
+    });
+
     it("shows the quoted fee on a completed withdrawal receipt", () => {
       const embed = getConfirmationInfo({
         userId: "user1",
