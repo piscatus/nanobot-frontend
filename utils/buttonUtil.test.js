@@ -2,8 +2,9 @@ const { confirm, swap } = require("./buttonUtil.js");
 const { buildEmbed } = require("./embedUtil.js");
 const { BUTTON_DESCRIPTIONS } = require("./constants.js");
 
-jest.mock("uuid", () => ({
-  v4: jest.fn(() => "fixed-uuid-12345"),
+jest.mock("crypto", () => ({
+  ...jest.requireActual("crypto"),
+  randomUUID: jest.fn(() => "fixed-uuid-12345"),
 }));
 
 describe("buttonUtil", () => {
@@ -57,7 +58,7 @@ describe("buttonUtil", () => {
     });
 
     it("returns false when user cancels", async () => {
-      const { v4: uuidv4 } = require("uuid");
+      const { randomUUID: uuidv4 } = require("crypto");
       uuidv4.mockReturnValueOnce("confirm-id").mockReturnValueOnce("cancel-id");
 
       const embed = buildEmbed({ title: "Confirm?", description: "Yes or no" });

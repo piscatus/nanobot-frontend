@@ -4,7 +4,7 @@ const {
   ButtonStyle,
   StringSelectMenuBuilder,
 } = require("discord.js");
-const { v4: uuidv4 } = require("uuid");
+const { randomUUID: uuidv4 } = require("crypto");
 const { getCommandIds } = require("./commandUtil.js");
 const {
   BROWSE_WINDOW_MILLISECONDS,

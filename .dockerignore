@@ -3,3 +3,7 @@
 .env.PRD
 node_modules
 cute
+.git
+.gitignore
+**/*.test.js
+verify-audit.js

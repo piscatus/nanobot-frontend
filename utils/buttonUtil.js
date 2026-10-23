@@ -1,5 +1,5 @@
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
-const { v4: uuidv4 } = require("uuid");
+const { randomUUID: uuidv4 } = require("crypto");
 const { BUTTON_DESCRIPTIONS, COLORS, EMOJIS, TIME } = require("./constants.js");
 const { buildEmbed } = require("./embedUtil.js");
 const { formatErrorTitle } = require("./errorUtil.js");

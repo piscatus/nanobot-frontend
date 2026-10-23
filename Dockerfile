@@ -1,26 +1,25 @@
-# Stage 1: Build environment
-FROM node:20 AS build
+# Stage 1: install dependencies
+FROM node:24.22.1-bookworm-slim AS build
 
-# Set the working directory in the build container to /app
 WORKDIR /app
 
-# Copy package.json and package-lock.json (if available) to the container
+# Install exactly what the lockfile says, then copy the application
 COPY package*.json ./
-
-# Install the application dependencies inside the container
-RUN npm ci
-
-# Bundle the application source code inside the container
+RUN npm ci --no-audit --no-fund
 COPY . .
 
-# Stage 2: Runtime environment
-FROM node:20-slim
+# Drop development-only packages (jest) from what ships in the image
+RUN npm prune --omit=dev --no-audit --no-fund
 
-# Set the working directory in the runtime container to /app
+# Stage 2: runtime
+FROM node:24.22.1-bookworm-slim
+
+ENV NODE_ENV=production
 WORKDIR /app
 
-# Copy only the necessary files from the build container
-COPY --from=build /app /app
+COPY --from=build --chown=node:node /app /app
 
-# Start the application
+# Run as the unprivileged node user (uid 1000, same as the cute/ bind mount owner)
+USER node
+
 CMD ["node", "index.js"]
