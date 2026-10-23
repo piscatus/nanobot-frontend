@@ -126,6 +126,56 @@ describe("channelUtil", () => {
         components: [],
       });
     });
+
+    it("returns null and does not edit when the embed has no visible content", async () => {
+      const error = jest.spyOn(console, "error").mockImplementation(() => {});
+      const mockMessage = {
+        edit: jest.fn().mockResolvedValue({ id: "msg-456" }),
+      };
+      const mockChannel = {
+        messages: { fetch: jest.fn().mockResolvedValue(mockMessage) },
+      };
+      mockClient.channels.cache.get.mockReturnValue(mockChannel);
+
+      const result = await channelUtil.editEmbed(
+        mockClient,
+        "editMessage",
+        "channel-123",
+        buildEmbed({ color: "#757575" }),
+        [],
+        "msg-456"
+      );
+
+      expect(result).toBeNull();
+      expect(mockChannel.messages.fetch).not.toHaveBeenCalled();
+      expect(mockMessage.edit).not.toHaveBeenCalled();
+      expect(error).toHaveBeenCalled();
+      error.mockRestore();
+    });
+
+    it("returns null and logs when message.edit rejects", async () => {
+      const error = jest.spyOn(console, "error").mockImplementation(() => {});
+      const mockMessage = {
+        edit: jest.fn().mockRejectedValue(new Error("Unknown Message")),
+      };
+      const mockChannel = {
+        messages: { fetch: jest.fn().mockResolvedValue(mockMessage) },
+      };
+      mockClient.channels.cache.get.mockReturnValue(mockChannel);
+
+      const result = await channelUtil.editEmbed(
+        mockClient,
+        "fish",
+        "channel-123",
+        buildEmbed({ title: "Test" }),
+        [],
+        "msg-456"
+      );
+
+      expect(result).toBeNull();
+      expect(error).toHaveBeenCalled();
+      error.mockRestore();
+    });
   });
 
   describe("send", () => {

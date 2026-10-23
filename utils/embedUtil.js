@@ -26,6 +26,23 @@ function clampFields(fields) {
   return kept;
 }
 
+/**
+ * True when a Discord embed would actually render something besides a colour
+ * bar. A colour-only payload is how Discord stores a blank edited message.
+ */
+function embedHasVisibleContent(embed) {
+  if (embed == null) return false;
+  const data =
+    embed.data && typeof embed.data === "object" ? embed.data : embed;
+  if (typeof data.title === "string" && data.title.trim() !== "") {
+    return true;
+  }
+  if (typeof data.description === "string" && data.description.trim() !== "") {
+    return true;
+  }
+  return Array.isArray(data.fields) && data.fields.length > 0;
+}
+
 function buildEmbed(options = {}) {
   const { color, title, description, url, fields, footer, thumbnail, error } =
     options;
@@ -60,4 +77,5 @@ function buildEmbed(options = {}) {
 
 module.exports = {
   buildEmbed,
+  embedHasVisibleContent,
 };

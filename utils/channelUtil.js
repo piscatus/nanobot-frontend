@@ -1,3 +1,5 @@
+const { embedHasVisibleContent } = require("./embedUtil.js");
+
 exports.deleteMessage = async function (client, command, channelId, messageId) {
   try {
     const channel = client.channels.cache.get(channelId);
@@ -33,6 +35,13 @@ exports.editEmbed = async function (
   components,
   messageId,
 ) {
+  if (!embedHasVisibleContent(embed)) {
+    console.error(
+      `${String(command).toUpperCase()} channelUtil.js editEmbed Error: embed has no title, description, or fields.`,
+    );
+    return null;
+  }
+
   try {
     const channel = client.channels.cache.get(channelId);
     if (channel === undefined) {
@@ -48,10 +57,11 @@ exports.editEmbed = async function (
       components: components,
     });
   } catch (logError) {
-    // console.error(
-    //   command.toUpperCase() + " channelUtil.js editEmbed Error:",
-    //   logError,
-    // );
+    console.error(
+      `${String(command).toUpperCase()} channelUtil.js editEmbed Error:`,
+      logError,
+    );
+    return null;
   }
 };
 

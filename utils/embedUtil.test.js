@@ -1,4 +1,4 @@
-const { buildEmbed } = require("./embedUtil.js");
+const { buildEmbed, embedHasVisibleContent } = require("./embedUtil.js");
 const { EMOJIS, COLORS } = require("./constants.js");
 
 describe("embedUtil", () => {
@@ -37,6 +37,25 @@ describe("embedUtil", () => {
       const embed = buildEmbed({});
       expect(embed).toBeDefined();
       expect(embed.data.title).toBeUndefined();
+    });
+
+    it("reports visible content from title, description, or fields", () => {
+      expect(embedHasVisibleContent(null)).toBe(false);
+      expect(embedHasVisibleContent(buildEmbed({ color: "#757575" }))).toBe(
+        false,
+      );
+      expect(embedHasVisibleContent(buildEmbed({ title: "Ended" }))).toBe(true);
+      expect(
+        embedHasVisibleContent(buildEmbed({ description: "Winners listed" })),
+      ).toBe(true);
+      expect(
+        embedHasVisibleContent(
+          buildEmbed({
+            fields: [{ name: "Joined", value: "**1**", inline: true }],
+          }),
+        ),
+      ).toBe(true);
+      expect(embedHasVisibleContent({ title: "Plain object" })).toBe(true);
     });
 
     it("builds embed with url", () => {

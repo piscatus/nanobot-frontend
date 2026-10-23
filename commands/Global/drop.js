@@ -17,11 +17,7 @@ const {
   catchMessageException,
   formatErrorTitle,
 } = require("../../utils/errorUtil.js");
-const {
-  deleteMessage,
-  editEmbed,
-  sendEmbed,
-} = require("../../utils/channelUtil.js");
+const { deleteMessage, sendEmbed } = require("../../utils/channelUtil.js");
 const {
   buildCriteriaList,
   executeTransferWithConfirmation,
@@ -332,7 +328,7 @@ module.exports = {
         COMMAND_KEYS.DROP,
         channelId,
         finalEmbed,
-        [],
+        [pickupButton],
       );
 
       const completedTransfer = Object.values(completedPrimaryTransfers)[0];
@@ -381,15 +377,6 @@ module.exports = {
             components: [],
           });
         } else {
-          await editEmbed(
-            client,
-            COMMAND_KEYS.DROP,
-            channelId,
-            finalEmbed,
-            [pickupButton],
-            message.id,
-          );
-
           await interaction.editReply({
             embeds: [receiptEmbed],
             components: [],

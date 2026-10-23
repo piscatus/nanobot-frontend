@@ -3,9 +3,8 @@ const { execute: deleteMessage } = require("./deleteMessage.js");
 const { editEmbed, sendEmbed } = require("../utils/channelUtil.js");
 const { sendDMEmbed } = require("../utils/userUtil.js");
 const { STATUS_CODES } = require("../utils/constants.js");
-const { buildEmbed } = require("../utils/embedUtil.js");
+const { buildEmbed, embedHasVisibleContent } = require("../utils/embedUtil.js");
 const { isValidString } = require("../utils/stringUtil.js");
-
 module.exports = {
   async execute(client) {
     try {
@@ -31,12 +30,17 @@ module.exports = {
           fields: message.list,
         });
 
-        // Direct Message
+        if (!embedHasVisibleContent(embed)) {
+          console.error(
+            "sendMessages.js skipped empty embed for queued message",
+            message.id,
+          );
+          continue;
+        }
+
         if (isValidString(message.userId)) {
           await sendDMEmbed(client, "sendDirectMessage", message.userId, embed);
-        }
-        // Edit Guild Message
-        else if (isValidString(message.messageId)) {
+        } else if (isValidString(message.messageId)) {
           await editEmbed(
             client,
             "editMessage",
@@ -45,9 +49,7 @@ module.exports = {
             [],
             message.messageId,
           );
-        } 
-        // Send Guild Message
-        else {
+        } else {
           await sendEmbed(client, "sendMessage", message.channelId, embed, []);
         }
       }
