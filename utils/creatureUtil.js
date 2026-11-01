@@ -115,7 +115,7 @@ function formatCreatures(creaturesDB, currenciesDB) {
       return a.odds - b.odds;
     })
     .map((creature) => {
-      const odds = new BigNumber(creature.odds).dividedBy(20).toString(10);
+      const odds = new BigNumber(creature.odds).dividedBy(10).toString(10);
       return {
         name: `${creature.emoji} **${creature.name}** (${creature.pluralization})`,
         value: `Fish Odds: ${odds}%\nSale Value: **${
