@@ -119,8 +119,8 @@ function formatServerRulesMessage() {
     "- No Botting / Scripting.\n" +
     "- No Political Discussions.\n" +
     "- No Religious Discussions.\n" +
-    "- No Account Impersonation." +
-    "- No AI Botting / LLM Masquerading.\n" +
+    "- No Account Impersonation.\n" +
+    "- No AI Botting / LLM Masquerading." +
     "\n\n" +
     "-# Please refer to the channel-specific rules before posting!"
   );
