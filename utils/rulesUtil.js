@@ -116,9 +116,11 @@ function formatServerRulesMessage() {
     "- No Financial Advice.\n" +
     "- No Unsolicited DMs.\n" +
     "- No Duplicate Accounts.\n" +
+    "- No Botting / Scripting.\n" +
     "- No Political Discussions.\n" +
     "- No Religious Discussions.\n" +
     "- No Account Impersonation." +
+    "- No AI Botting / LLM Masquerading.\n" +
     "\n\n" +
     "-# Please refer to the channel-specific rules before posting!"
   );
