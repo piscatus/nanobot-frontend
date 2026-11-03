@@ -115,8 +115,8 @@ function formatServerRulesMessage() {
     "- No Self-Promotion.\n" +
     "- No Financial Advice.\n" +
     "- No Unsolicited DMs.\n" +
-    "- No Duplicate Accounts.\n" +
     "- No Botting / Scripting.\n" +
+    "- No Duplicate Accounts.\n" +
     "- No Political Discussions.\n" +
     "- No Religious Discussions.\n" +
     "- No Account Impersonation.\n" +
